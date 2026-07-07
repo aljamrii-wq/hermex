@@ -101,6 +101,10 @@ enum Endpoint {
     case upload
     case transcribe
     case tts
+    case uniOpsMobileSession
+    case uniOpsMobileSessionRevoke(id: String)
+    case uniOpsMobileRefresh
+    case uniOpsMobilePushToken
 
     var path: String {
         switch self {
@@ -304,7 +308,19 @@ enum Endpoint {
             return "/api/transcribe"
         case .tts:
             return "/api/tts"
+        case .uniOpsMobileSession:
+            return "/api/auth/mobile/session"
+        case .uniOpsMobileSessionRevoke(let id):
+            return "/api/auth/mobile/session/\(id)"
+        case .uniOpsMobileRefresh:
+            return "/api/auth/mobile/refresh"
+        case .uniOpsMobilePushToken:
+            return "/api/admin/mobile/push-token"
         }
+    }
+
+    var isUniOpsAdminEndpoint: Bool {
+        path.hasPrefix("/api/admin/")
     }
 
     var queryItems: [URLQueryItem] {

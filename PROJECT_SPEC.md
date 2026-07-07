@@ -162,6 +162,7 @@ When in doubt about behavior, hit your running server with `curl` and inspect th
 | Syntax highlighting | **[Splash](https://github.com/JohnSundell/Splash)** for Swift, **[Highlightr](https://github.com/raspu/Highlightr)** for everything else | Plug into swift-markdown-ui's code block renderer |
 | Local cache | **SwiftData** | Native; simple for our small schema |
 | Secrets | **Keychain** via `KeychainAccess` library OR a small wrapper around `Security` framework | Don't store password/token in `UserDefaults` |
+| UniOps owner sign-in | **[GoogleSignIn-iOS](https://github.com/google/GoogleSignIn-iOS) 9.2.0** | Exact pinned package for Google ID tokens passed to `POST /api/auth/mobile/session` |
 | Logging | `OSLog` (built-in) | Free, works in Console.app |
 | Testing | XCTest + a tiny URLProtocol-based mock server | No third-party test framework |
 | Linting | SwiftLint (optional, recommended) | Run in build phase |

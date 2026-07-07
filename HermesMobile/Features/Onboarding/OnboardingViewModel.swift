@@ -6,6 +6,21 @@ import Observation
 final class OnboardingViewModel {
     nonisolated static let emptyPasswordMessage = String(localized: "Enter the server password.")
 
+    enum AuthMode: String, CaseIterable, Identifiable {
+        case hermex
+        case uniOps
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .hermex: return String(localized: "Hermex")
+            case .uniOps: return String(localized: "UniOps")
+            }
+        }
+    }
+
+    var authMode: AuthMode = .hermex
     var serverURLString = ""
     var password = ""
     var customHeaders: [CustomHeader] = []
@@ -27,6 +42,7 @@ final class OnboardingViewModel {
     }
 
     var isPasswordRequired: Bool {
+        guard authMode == .hermex else { return false }
         // No auth → no password. Passkey-only (auth on, password auth explicitly
         // off) → hide the password field; connect() surfaces the unsupported
         // message instead. Unknown (nil) keeps today's "show the field" default.
@@ -35,6 +51,12 @@ final class OnboardingViewModel {
     }
 
     func testConnection(authManager: AuthManager) async {
+        guard authMode == .hermex else {
+            connectionMessage = nil
+            errorMessage = String(localized: "Use Google Sign-In to verify UniOps.")
+            return
+        }
+
         errorMessage = nil
         connectionMessage = nil
         isWorking = true
@@ -61,6 +83,11 @@ final class OnboardingViewModel {
     func connect(authManager: AuthManager) async {
         errorMessage = nil
         connectionMessage = nil
+
+        guard authMode == .hermex else {
+            await connectUniOps(authManager: authManager)
+            return
+        }
 
         if let validationMessage = Self.passwordValidationMessage(authStatus: authStatus, password: password) {
             errorMessage = validationMessage
@@ -93,6 +120,27 @@ final class OnboardingViewModel {
             customHeaders: customHeaders
         )
         errorMessage = authManager.lastErrorMessage
+    }
+
+    private func connectUniOps(authManager: AuthManager) async {
+        guard !serverURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = APIError.invalidServerURL.localizedDescription
+            return
+        }
+
+        isWorking = true
+        defer { isWorking = false }
+
+        do {
+            let credential = try await GoogleSignInProvider.signInCredential()
+            await authManager.configureUniOps(
+                serverURLString: serverURLString,
+                credential: credential
+            )
+            errorMessage = authManager.lastErrorMessage
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     nonisolated static func passwordValidationMessage(authStatus: AuthStatusResponse?, password: String) -> String? {

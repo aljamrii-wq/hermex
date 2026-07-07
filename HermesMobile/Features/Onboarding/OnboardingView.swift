@@ -153,12 +153,16 @@ struct OnboardingView: View {
     private var connectActionButtons: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 10) {
-                testConnectionButton
+                if viewModel.authMode == .hermex {
+                    testConnectionButton
+                }
                 connectButton
             }
 
             VStack(spacing: 10) {
-                testConnectionButton
+                if viewModel.authMode == .hermex {
+                    testConnectionButton
+                }
                 connectButton
             }
         }
@@ -179,7 +183,7 @@ struct OnboardingView: View {
         Button {
             Task { await viewModel.connect(authManager: authManager) }
         } label: {
-            Label("Connect", systemImage: "checkmark.circle.fill")
+            Label(viewModel.authMode == .uniOps ? String(localized: "Sign in with Google") : String(localized: "Connect"), systemImage: viewModel.authMode == .uniOps ? "person.crop.circle.badge.checkmark" : "checkmark.circle.fill")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(OnboardingPrimaryButtonStyle())

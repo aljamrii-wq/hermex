@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+@testable import HermesMobile
 
 /// Guards the App Localization effort (issues #290, #291, …): every translatable key in
 /// `Localizable.xcstrings` must carry a non-empty value in **each shipped language**. This
@@ -106,5 +108,22 @@ final class LocalizationCatalogTests: XCTestCase {
                 XCTAssertTrue(hasNonEmptyValue(localization), "[\(language)] \(phrase) is empty")
             }
         }
+    }
+
+    func testUniOpsSurfaceHasEnglishLTRAndArabicRTLProof() throws {
+        XCTAssertEqual(UniOpsLocalePolicy.layoutDirection(for: Locale(identifier: "en")), LayoutDirection.leftToRight)
+        XCTAssertEqual(UniOpsLocalePolicy.layoutDirection(for: Locale(identifier: "ar")), LayoutDirection.rightToLeft)
+
+        let data = try Data(contentsOf: catalogURL())
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let strings = try XCTUnwrap(root["strings"] as? [String: Any])
+        let entry = try XCTUnwrap(strings["Dashboard Summary"] as? [String: Any])
+        let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+        let ar = try XCTUnwrap(localizations["ar"] as? [String: Any])
+        let stringUnit = try XCTUnwrap(ar["stringUnit"] as? [String: Any])
+        XCTAssertEqual(
+            stringUnit["value"] as? String,
+            "ملخص لوحة التحكم"
+        )
     }
 }

@@ -28,6 +28,14 @@
 				<string>$(HERMES_URL_SCHEME)</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).google</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(GOOGLE_SIGN_IN_REVERSED_CLIENT_ID)</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
@@ -39,6 +47,8 @@
 	<string>$(KEYCHAIN_SERVICE)</string>
 	<key>HermesURLScheme</key>
 	<string>$(HERMES_URL_SCHEME)</string>
+	<key>GIDClientID</key>
+	<string>$(GOOGLE_SIGN_IN_CLIENT_ID)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
@@ -48,8 +58,17 @@
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 			</dict>
+			<key>ts.net</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
 		</dict>
 	</dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>UniOps uses Face ID to unlock the founder control plane on this iPhone.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Hermex needs microphone access to dictate text into the message composer.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

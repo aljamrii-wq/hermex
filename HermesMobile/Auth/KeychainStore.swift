@@ -21,6 +21,11 @@ struct KeychainStore: KeychainStoring {
         // JSON-encoded [{name, value}] of user-supplied request headers (#255).
         // Values may be secrets, so the list lives in the Keychain, not defaults.
         case customHeaders = "custom_headers"
+        case uniOpsServerURL = "uniops_server_url"
+        case uniOpsToken = "uniops_token"
+        case uniOpsRefreshToken = "uniops_refresh_token"
+        case uniOpsSessionID = "uniops_session_id"
+        case uniOpsDeviceID = "uniops_device_id"
         // JSON-encoded multi-server registry (server list + active id). The server
         // URL is treated as a credential (PROJECT_SPEC Phase 1), so the registry
         // lives in the Keychain, not UserDefaults (#15).

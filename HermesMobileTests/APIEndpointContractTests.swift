@@ -13,6 +13,10 @@ final class ContractReadinessTests: XCTestCase {
             .init(name: "auth status", method: "GET", endpoint: .authStatus, path: "/api/auth/status"),
             .init(name: "login", method: "POST", endpoint: .login, path: "/api/auth/login"),
             .init(name: "logout", method: "POST", endpoint: .logout, path: "/api/auth/logout"),
+            .init(name: "UniOps mobile session", method: "POST", endpoint: .uniOpsMobileSession, path: "/api/auth/mobile/session"),
+            .init(name: "UniOps mobile refresh", method: "POST", endpoint: .uniOpsMobileRefresh, path: "/api/auth/mobile/refresh"),
+            .init(name: "UniOps mobile push token", method: "POST", endpoint: .uniOpsMobilePushToken, path: "/api/admin/mobile/push-token"),
+            .init(name: "UniOps mobile revoke", method: "DELETE", endpoint: .uniOpsMobileSessionRevoke(id: "session-123"), path: "/api/auth/mobile/session/session-123"),
             .init(name: "sessions", method: "GET", endpoint: .sessions(), path: "/api/sessions"),
             .init(
                 name: "sessions including archived",
@@ -272,7 +276,7 @@ final class ContractReadinessTests: XCTestCase {
 
             XCTAssertEqual(components.path, contract.path, contract.name)
             XCTAssertEqual(queryDictionary(from: components), contract.query, contract.name)
-            XCTAssertTrue(["GET", "POST"].contains(contract.method), contract.name)
+            XCTAssertTrue(["GET", "POST", "DELETE"].contains(contract.method), contract.name)
         }
     }
 

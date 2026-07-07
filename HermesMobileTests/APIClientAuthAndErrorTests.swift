@@ -127,6 +127,59 @@ final class APIClientAuthAndErrorTests: APIClientTestCase {
         }
     }
 
+    func testUniOpsAdminRequestAddsBearerUserAgentAndRefreshesOnce() async throws {
+        var requestCount = 0
+        var didRefresh = false
+        MockURLProtocol.requestHandler = { request in
+            requestCount += 1
+            XCTAssertEqual(request.url?.path, "/api/admin/mobile/push-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), APIClient.fixedUserAgent)
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "Authorization"),
+                didRefresh ? "Bearer refreshed-token" : "Bearer stale-token"
+            )
+
+            if requestCount == 1 {
+                return (
+                    HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!,
+                    Data()
+                )
+            }
+
+            let body = try XCTUnwrap(apiTestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["deviceId"] as? String, "device-1")
+            XCTAssertNil(json["device_id"])
+
+            return apiTestJSONResponse(#"{"success":true,"id":"push-1"}"#, for: request)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = APIClient(
+            baseURL: URL(string: "https://example.test")!,
+            session: session,
+            customHeaderProvider: {
+                [CustomHeader(name: "Authorization", value: "Bearer user-supplied")]
+            },
+            bearerTokenProvider: {
+                didRefresh ? "refreshed-token" : "stale-token"
+            },
+            mobileRefreshHandler: {
+                didRefresh = true
+                return "refreshed-token"
+            }
+        )
+
+        let response = try await client.registerUniOpsPushToken(token: "apns-token", deviceId: "device-1")
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.id, "push-1")
+        XCTAssertEqual(requestCount, 2)
+        XCTAssertTrue(didRefresh)
+    }
+
     func testVanishedSessionResponseUsesRecoveryMessage() async throws {
         let client = makeClient { request in
             let response = HTTPURLResponse(
