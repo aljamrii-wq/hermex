@@ -16,6 +16,18 @@ Full plan (read it first): in the uniops repo,
 
 **Why hermex is the base:** it already ships exactly the control-plane breadth the plan wanted — streaming chat with steer/stop mid-run, sessions (browse/search/resume + offline cache), scheduled **Tasks** (cron), **Skills** browser, **Workspace** file browser, **Memory/Insights**, a **Live Activity** widget, a **Share Extension**, and App Intents. It's native SwiftUI, iOS 18+, MIT, zero-to-few third-party deps. The main work is **swapping its connection/auth layer from `hermes-webui` (URL+password) to UniOps**, then adding UniOps-specific surfaces (approvals first).
 
+> **Correction (2026-07-07, post your Phase-1 push `49df36d`):** `uniops#226` merged into `dev`
+> while Phase 1 was in flight and shipped a **unified `GET /api/admin/approvals`** endpoint
+> (Approvals Command Center) that supersedes the five separate approval endpoints §4 originally
+> listed. Re-point the approvals inbox at the unified endpoint — see the updated §2/§4 below. Two
+> corrections to what you built: **GitHub escrow is not a separate source** (escrow items are
+> `OpenClawPendingAction` rows the OpenClaw decision routes already branch on — approving via
+> OpenClaw covers escrow, don't call the escrow routes directly), and **NightShift is not an
+> approvals source** in the canonical design (drop the NightShift improvement/skill-card decision
+> screens from the approvals inbox — NightShift stays its own standalone feature, not wired here).
+> Everything else you built (auth shell, Keychain, Face ID, bearer+refresh, APNs, dashboard proof,
+> owner-confirmation gate, EN/AR/RTL) is unaffected and correct.
+
 ## 2. What is already DONE (server-side, by Claude) — uniops PR #229
 
 The backend unblocker is merged-ready on branch `claude/uniops-ios-control-plane-kzsnpj`. All of it is verified: `tsc --noEmit` clean, migrations applied to a real Postgres, contract tests green. You do **not** need to build any of this — just call it.
@@ -30,6 +42,29 @@ The backend unblocker is merged-ready on branch `claude/uniops-ios-control-plane
 - `GET /api/auth/mobile/session` — list the owner's active sessions (security screen). **Bearer.**
   - 200: `{ success, sessions: [{ id, channel, tokenClass, deviceName, deviceId, createdAt, lastSeenAt, expiresAt }] }`
 - `DELETE /api/auth/mobile/session/{id}` — **lost-phone kill switch.** Bearer. → `{ success, revoked }`.
+
+### Approvals (unified — `uniops#226`, merged to `dev`)
+- `GET /api/admin/approvals` — **Bearer**, requires `settings:view` OR `system:view` (owner has `*:*`
+  via `requireAnyPermission`). Query: `?source=openclaw|agent_runtime|autopilot|supplier_ops`
+  (optional filter), `?countOnly=1` (badge-poll mode → `{ success, counts, generatedAt }` only),
+  `?limit=` (default via `resolveListLimit`, cap 200; `countOnly` uses 500).
+  - 200 body: `{ success, items: PendingApprovalItem[], counts: { total, bySource: {openclaw,
+    agent_runtime, autopilot, supplier_ops} }, generatedAt }`.
+  - `PendingApprovalItem`: `{ id: "<source>:<recordId>", source, title, description, riskTier,
+    requestedBy, requestedAt, stepUp: boolean, href, decide: { approve: {url, body}, deny: {url,
+    body} | null, headers?: {"x-tenant-id"?: string}, reasonField: "reason"|"decisionNote"|null } }`.
+  - **The client does not need per-source endpoint knowledge.** Each item's `decide.approve`/`.deny`
+    already carries the exact URL + JSON body to POST (merge in the owner's note under
+    `reasonField` if present, and send `decide.headers` if present, e.g. `x-tenant-id` for
+    `agent_runtime`). `stepUp: true` means that item's decision route needs a recent step-up — a
+    freshly minted/refreshed mobile token satisfies it.
+  - **GitHub escrow is not a separate source.** Escrow items surface as `source: "openclaw"` (title
+    prefixed `GitHub · ...`); their `decide` URLs are the OpenClaw approve/deny routes, which branch
+    internally. Do not call the escrow routes directly.
+  - **NightShift is not an approvals source.** It is intentionally absent — leave it out of the
+    approvals inbox entirely; it remains a standalone feature outside this MVP.
+- Real-time updates: no bearer-accepting SSE yet (see §4) — poll `GET /api/admin/approvals?countOnly=1`
+  for the badge and re-fetch the full list on pull-to-refresh / APNs wake.
 
 ### Push
 - `POST /api/admin/mobile/push-token` — register the APNs device token. **Bearer**, requires `dashboard:view` (owner has `*:*`).
@@ -67,14 +102,16 @@ Work in `HermesMobile/`. The layers to change:
 Build in this order; each phase is a sideload build for the owner.
 
 - **iOS Phase 0 — Auth + shell.** Google Sign-In → `/api/auth/mobile/session` bearer; Keychain + Face ID; refresh-on-401; fixed User-Agent; Tailscale reachability (hermex already allows plain HTTP on `100.64.0.0/10` — extend to the UniOps host); register APNs token. Ship a signed-in dashboard-summary screen (authenticated proof — not signed-out).
-- **iOS Phase 1 — Approvals MVP ("approve UniOps from your phone").** An inbox over the existing UniOps approval endpoints (all POST, Bearer, most step-up-gated — a fresh mobile token satisfies step-up; Face-ID re-mint refreshes it):
-  - `/api/admin/agents/openclaw/pending-actions/{id}/approve` · `/deny`
-  - `/api/admin/agents/runtime/approvals/{id}/decision` (`{ approved }`, header `x-tenant-id`)
-  - `/api/admin/autopilots/runs/{runId}/actions/{actionId}/approve` (`{ approved }`)
-  - `/api/admin/integrations/github/escrow/{intentId}/approve` · `/deny`
-  - `/api/admin/nightshift/improvements/decision` · `/api/admin/nightshift/skills/decision`
-  - Action Center + live feed: `GET /api/stream`, `GET /api/admin/realtime/stream` (SSE; **cookie-auth only today — add a bearer variant server-side or poll + APNs wake**). Mirror the owner-confirmation triggers from §2 before sending an approval.
-  - Live Activity for a running agent task; APNs push wakes it.
+- **iOS Phase 1 — Approvals MVP ("approve UniOps from your phone").** One inbox over the unified
+  `GET /api/admin/approvals` (see §2) — **not** the individual per-source routes. Render `items`
+  grouped/badged by `source` (openclaw — incl. escrow — / agent_runtime / autopilot / supplier_ops;
+  **no NightShift**); tapping approve/deny POSTs exactly the item's `decide.approve`/`.deny` `{url,
+  body}` (+ `headers` if present, + the owner's note under `reasonField` if the UI collects one).
+  Mirror the owner-confirmation triggers from §2 before sending any decision. `stepUp: true` items
+  are covered by a fresh/refreshed mobile token. Badge count: poll `?countOnly=1`.
+  Action Center + live feed: `GET /api/stream`, `GET /api/admin/realtime/stream` (SSE; **cookie-auth
+  only today — add a bearer variant server-side or poll + APNs wake**).
+  Live Activity for a running agent task; APNs push wakes it.
 - **iOS Phase 2 — Agent console.** Reuse hermex's chat/steer-stop/sessions/tasks/skills/files against the Hermes agent gateway.
 - **iOS Phase 3+ — Fleet Ops (ops repo surfaces, monitoring-first), product consoles (Finance/Travel/Inbox/Compliance), device control (glasses/Flipper/camera). See the plan.**
 
@@ -99,7 +136,8 @@ Follow `DEVELOPMENT.md` (post-change flow) and `CONTRACT_TESTS.md` (tolerant dec
 
 ## 7. References
 - Plan: `uniops` → `docs/superpowers/plans/2026-07-07-uniops-ios-founder-control-plane.md`
-- Backend endpoints: `uniops` → `app/api/auth/mobile/*`, `app/api/admin/mobile/push-token/route.ts`
+- Backend endpoints: `uniops` → `app/api/auth/mobile/*`, `app/api/admin/mobile/push-token/route.ts`, `app/api/admin/approvals/route.ts` (unified approvals, from `uniops#226`)
+- Approvals aggregator (source of the item/decide contract): `uniops` → `lib/approvals/{service,types}.ts`
 - Session store / policy: `uniops` → `lib/mobile-operator-console/{session,authorize,google-owner}.ts`; APNs `lib/mobile-push/apns.ts`
 - This app's source of truth: `PROJECT_SPEC.md`, `DEVELOPMENT.md`, `AGENTS.md`
 - Branch convention: develop on `claude/uniops-ios-control-plane-kzsnpj`; open draft PRs.
