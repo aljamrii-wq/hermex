@@ -17,6 +17,27 @@ final class ContractReadinessTests: XCTestCase {
             .init(name: "UniOps mobile refresh", method: "POST", endpoint: .uniOpsMobileRefresh, path: "/api/auth/mobile/refresh"),
             .init(name: "UniOps mobile push token", method: "POST", endpoint: .uniOpsMobilePushToken, path: "/api/admin/mobile/push-token"),
             .init(name: "UniOps mobile revoke", method: "DELETE", endpoint: .uniOpsMobileSessionRevoke(id: "session-123"), path: "/api/auth/mobile/session/session-123"),
+            .init(name: "UniOps runtime approvals", method: "GET", endpoint: .uniOpsRuntimeApprovals, path: "/api/admin/agents/runtime/approvals"),
+            .init(name: "UniOps runtime approval decision", method: "POST", endpoint: .uniOpsRuntimeApprovalDecision(id: "approval-123"), path: "/api/admin/agents/runtime/approvals/approval-123/decision"),
+            .init(
+                name: "UniOps NightShift improvements",
+                method: "GET",
+                endpoint: .uniOpsNightShiftImprovements(status: "approval_required", limit: 20),
+                path: "/api/admin/nightshift/improvements",
+                query: ["status": "approval_required", "limit": "20"]
+            ),
+            .init(name: "UniOps NightShift improvement decision", method: "POST", endpoint: .uniOpsNightShiftImprovementDecision, path: "/api/admin/nightshift/improvements/decision"),
+            .init(
+                name: "UniOps NightShift skills",
+                method: "GET",
+                endpoint: .uniOpsNightShiftSkills(status: "discovered", scope: "codex", limit: 20),
+                path: "/api/admin/nightshift/skills",
+                query: ["status": "discovered", "scope": "codex", "limit": "20"]
+            ),
+            .init(name: "UniOps NightShift skill decision", method: "POST", endpoint: .uniOpsNightShiftSkillDecision, path: "/api/admin/nightshift/skills/decision"),
+            .init(name: "UniOps OpenClaw pending action approve", method: "POST", endpoint: .uniOpsOpenClawPendingActionDecision(id: "pending-123", action: "approve"), path: "/api/admin/agents/openclaw/pending-actions/pending-123/approve"),
+            .init(name: "UniOps autopilot action approve", method: "POST", endpoint: .uniOpsAutopilotActionDecision(runID: "run-123", actionID: "action-123"), path: "/api/admin/autopilots/runs/run-123/actions/action-123/approve"),
+            .init(name: "UniOps GitHub escrow deny", method: "POST", endpoint: .uniOpsGitHubEscrowDecision(intentID: "intent-123", action: "deny"), path: "/api/admin/integrations/github/escrow/intent-123/deny"),
             .init(name: "sessions", method: "GET", endpoint: .sessions(), path: "/api/sessions"),
             .init(
                 name: "sessions including archived",

@@ -125,5 +125,20 @@ final class LocalizationCatalogTests: XCTestCase {
             stringUnit["value"] as? String,
             "ملخص لوحة التحكم"
         )
+
+        let approvalsEntry = try XCTUnwrap(strings["Approvals"] as? [String: Any])
+        let approvalsLocalizations = try XCTUnwrap(approvalsEntry["localizations"] as? [String: Any])
+        let approvalsArabic = try XCTUnwrap(approvalsLocalizations["ar"] as? [String: Any])
+        let approvalsStringUnit = try XCTUnwrap(approvalsArabic["stringUnit"] as? [String: Any])
+        XCTAssertEqual(
+            approvalsStringUnit["value"] as? String,
+            "الموافقات"
+        )
+    }
+
+    func testUniOpsOwnerActionPolicyRequiresFounderConfirmationForProtectedOperations() {
+        XCTAssertTrue(UniOpsOwnerActionPolicy.requiresFounderConfirmation(text: "Deploy production payment update"))
+        XCTAssertTrue(UniOpsOwnerActionPolicy.requiresFounderConfirmation(text: "Rotate DNS credential"))
+        XCTAssertFalse(UniOpsOwnerActionPolicy.requiresFounderConfirmation(text: "Summarize nightly observation"))
     }
 }

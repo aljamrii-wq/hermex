@@ -125,10 +125,30 @@ actor APIClient {
     func sendUniOps<Response: Decodable, Body: Encodable>(
         endpoint: Endpoint,
         method: String,
-        body: Body?
+        body: Body?,
+        additionalHeaders: [String: String] = [:]
     ) async throws -> Response {
         let encodedBody = try body.map { try uniOpsEncoder.encode($0) }
-        let data = try await sendData(endpoint: endpoint, method: method, encodedBody: encodedBody)
+        let data = try await sendData(
+            endpoint: endpoint,
+            method: method,
+            encodedBody: encodedBody,
+            additionalHeaders: additionalHeaders
+        )
+        return try decode(Response.self, from: data)
+    }
+
+    func sendUniOps<Response: Decodable>(
+        endpoint: Endpoint,
+        method: String,
+        additionalHeaders: [String: String] = [:]
+    ) async throws -> Response {
+        let data = try await sendData(
+            endpoint: endpoint,
+            method: method,
+            encodedBody: nil,
+            additionalHeaders: additionalHeaders
+        )
         return try decode(Response.self, from: data)
     }
 
@@ -160,13 +180,15 @@ actor APIClient {
         endpoint: Endpoint,
         method: String,
         encodedBody: Data?,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        additionalHeaders: [String: String] = [:]
     ) async throws -> Data {
         try await sendDataReturningResponse(
             endpoint: endpoint,
             method: method,
             encodedBody: encodedBody,
-            timeout: timeout
+            timeout: timeout,
+            additionalHeaders: additionalHeaders
         ).0
     }
 
@@ -181,7 +203,8 @@ actor APIClient {
         method: String,
         encodedBody: Data?,
         timeout: TimeInterval? = nil,
-        accept: String = "application/json"
+        accept: String = "application/json",
+        additionalHeaders: [String: String] = [:]
     ) async throws -> (Data, HTTPURLResponse) {
         try await sendDataReturningResponse(
             endpoint: endpoint,
@@ -189,6 +212,7 @@ actor APIClient {
             encodedBody: encodedBody,
             timeout: timeout,
             accept: accept,
+            additionalHeaders: additionalHeaders,
             hasRetriedAfterRefresh: false
         )
     }
@@ -199,6 +223,7 @@ actor APIClient {
         encodedBody: Data?,
         timeout: TimeInterval?,
         accept: String,
+        additionalHeaders: [String: String],
         hasRetriedAfterRefresh: Bool
     ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: endpoint.url(relativeTo: baseURL))
@@ -209,6 +234,9 @@ actor APIClient {
         if let timeout { request.timeoutInterval = timeout }
         // Custom headers first, then built-ins/UniOps auth so app-owned headers win.
         await applyStandardHeaders(to: &request)
+        for (name, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         request.setValue(accept, forHTTPHeaderField: "Accept")
 
         if let encodedBody {
@@ -238,6 +266,7 @@ actor APIClient {
                 encodedBody: encodedBody,
                 timeout: timeout,
                 accept: accept,
+                additionalHeaders: additionalHeaders,
                 hasRetriedAfterRefresh: true
             )
         }
@@ -384,6 +413,125 @@ extension APIClient {
                 deviceId: deviceId,
                 platform: "apns"
             )
+        )
+    }
+
+    func uniOpsRuntimeApprovals(tenantID: String) async throws -> UniOpsRuntimeApprovalsPayload {
+        let response: UniOpsAPIResponse<UniOpsRuntimeApprovalsPayload> = try await sendUniOps(
+            endpoint: .uniOpsRuntimeApprovals,
+            method: "GET",
+            additionalHeaders: ["x-tenant-id": tenantID]
+        )
+        return response.data ?? UniOpsRuntimeApprovalsPayload()
+    }
+
+    func decideUniOpsRuntimeApproval(
+        id: String,
+        tenantID: String,
+        approved: Bool,
+        decisionNote: String? = nil
+    ) async throws -> UniOpsAPIResponse<UniOpsRuntimeApprovalDecisionPayload> {
+        try await sendUniOps(
+            endpoint: .uniOpsRuntimeApprovalDecision(id: id),
+            method: "POST",
+            body: UniOpsRuntimeApprovalDecisionRequest(
+                approved: approved,
+                decisionNote: decisionNote
+            ),
+            additionalHeaders: ["x-tenant-id": tenantID]
+        )
+    }
+
+    func uniOpsNightShiftImprovements(
+        status: String? = nil,
+        limit: Int = 20
+    ) async throws -> UniOpsNightShiftImprovementsPayload {
+        let response: UniOpsAPIResponse<UniOpsNightShiftImprovementsPayload> = try await sendUniOps(
+            endpoint: .uniOpsNightShiftImprovements(status: status, limit: limit),
+            method: "GET"
+        )
+        return response.data ?? UniOpsNightShiftImprovementsPayload()
+    }
+
+    func decideUniOpsNightShiftImprovement(
+        proposalKey: String,
+        decision: String,
+        botId: String? = nil,
+        feedbackNote: String? = nil
+    ) async throws -> UniOpsAPIResponse<UniOpsNightShiftImprovementDecisionPayload> {
+        try await sendUniOps(
+            endpoint: .uniOpsNightShiftImprovementDecision,
+            method: "POST",
+            body: UniOpsNightShiftImprovementDecisionRequest(
+                proposalKey: proposalKey,
+                decision: decision,
+                botId: botId,
+                feedbackNote: feedbackNote
+            )
+        )
+    }
+
+    func uniOpsNightShiftSkills(
+        status: String? = nil,
+        scope: String? = nil,
+        limit: Int = 20
+    ) async throws -> UniOpsNightShiftSkillsPayload {
+        let response: UniOpsAPIResponse<UniOpsNightShiftSkillsPayload> = try await sendUniOps(
+            endpoint: .uniOpsNightShiftSkills(status: status, scope: scope, limit: limit),
+            method: "GET"
+        )
+        return response.data ?? UniOpsNightShiftSkillsPayload()
+    }
+
+    func decideUniOpsNightShiftSkill(
+        skillKey: String,
+        action: String,
+        botId: String? = nil
+    ) async throws -> UniOpsAPIResponse<UniOpsNightShiftSkillDecisionPayload> {
+        try await sendUniOps(
+            endpoint: .uniOpsNightShiftSkillDecision,
+            method: "POST",
+            body: UniOpsNightShiftSkillDecisionRequest(
+                skillKey: skillKey,
+                action: action,
+                botId: botId
+            )
+        )
+    }
+
+    func decideUniOpsOpenClawPendingAction(
+        id: String,
+        action: String,
+        reason: String? = nil
+    ) async throws -> UniOpsDecisionResponse {
+        try await sendUniOps(
+            endpoint: .uniOpsOpenClawPendingActionDecision(id: id, action: action),
+            method: "POST",
+            body: UniOpsReasonRequest(reason: reason)
+        )
+    }
+
+    func decideUniOpsAutopilotAction(
+        runID: String,
+        actionID: String,
+        approved: Bool
+    ) async throws -> UniOpsAPIResponse<UniOpsDecisionPayload> {
+        try await sendUniOps(
+            endpoint: .uniOpsAutopilotActionDecision(runID: runID, actionID: actionID),
+            method: "POST",
+            body: UniOpsAutopilotActionDecisionRequest(approved: approved)
+        )
+    }
+
+    func decideUniOpsGitHubEscrow(
+        intentID: String,
+        action: String,
+        reason: String? = nil
+    ) async throws -> UniOpsDecisionResponse {
+        try await sendUniOps(
+            endpoint: .uniOpsGitHubEscrowDecision(intentID: intentID, action: action),
+            method: "POST",
+            body: UniOpsReasonRequest(reason: reason)
         )
     }
 }

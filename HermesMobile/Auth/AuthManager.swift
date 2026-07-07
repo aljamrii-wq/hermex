@@ -250,6 +250,44 @@ final class AuthManager {
         return try await makeUniOpsAPIClient(server: server).uniOpsMobileSessions()
     }
 
+    func loadUniOpsApprovalInbox(tenantID: String) async throws -> UniOpsApprovalInboxSnapshot {
+        let client = try signedInUniOpsAPIClient()
+        async let sessions = client.uniOpsMobileSessions()
+        async let runtimeApprovals = client.uniOpsRuntimeApprovals(tenantID: tenantID)
+        async let improvements = client.uniOpsNightShiftImprovements(status: "approval_required", limit: 20)
+        async let skills = client.uniOpsNightShiftSkills(status: "discovered", scope: nil, limit: 20)
+
+        return try await UniOpsApprovalInboxSnapshot(
+            sessions: sessions.sessions,
+            runtimeApprovals: runtimeApprovals.approvals,
+            improvementProposals: improvements.proposals,
+            skillCards: skills.cards
+        )
+    }
+
+    func decideUniOpsRuntimeApproval(id: String, tenantID: String, approved: Bool) async throws {
+        _ = try await signedInUniOpsAPIClient()
+            .decideUniOpsRuntimeApproval(id: id, tenantID: tenantID, approved: approved)
+    }
+
+    func decideUniOpsNightShiftImprovement(
+        proposalKey: String,
+        decision: String,
+        botId: String?
+    ) async throws {
+        _ = try await signedInUniOpsAPIClient()
+            .decideUniOpsNightShiftImprovement(
+                proposalKey: proposalKey,
+                decision: decision,
+                botId: botId
+            )
+    }
+
+    func decideUniOpsNightShiftSkill(skillKey: String, action: String, botId: String?) async throws {
+        _ = try await signedInUniOpsAPIClient()
+            .decideUniOpsNightShiftSkill(skillKey: skillKey, action: action, botId: botId)
+    }
+
     func registerUniOpsPushToken(_ token: String) async {
         guard case .uniOpsSignedIn(let server) = state else { return }
         do {
@@ -667,6 +705,15 @@ final class AuthManager {
                 try await self?.refreshUniOpsTokenForRetry()
             }
         )
+    }
+
+    private func signedInUniOpsAPIClient() throws -> APIClient {
+        switch state {
+        case .uniOpsSignedIn(let server):
+            return makeUniOpsAPIClient(server: server)
+        default:
+            throw APIError.unauthorized
+        }
     }
 
     private func storedUniOpsToken() -> String? {

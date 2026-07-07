@@ -180,6 +180,98 @@ final class APIClientAuthAndErrorTests: APIClientTestCase {
         XCTAssertTrue(didRefresh)
     }
 
+    func testUniOpsRuntimeApprovalsUseTenantHeaderAndDecodeEnvelope() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/admin/agents/runtime/approvals")
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-tenant-id"), "aljamri")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), APIClient.fixedUserAgent)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer owner-token")
+
+            return apiTestJSONResponse("""
+            {
+              "ok": true,
+              "data": {
+                "approvals": [
+                  {
+                    "id": "approval-1",
+                    "tenantId": "aljamri",
+                    "taskId": "task-1",
+                    "category": "payment",
+                    "reason": "Approve supplier refund",
+                    "status": "pending",
+                    "requestedBy": "nightshift"
+                  }
+                ]
+              }
+            }
+            """, for: request)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(
+            baseURL: URL(string: "https://example.test")!,
+            session: URLSession(configuration: configuration),
+            bearerTokenProvider: { "owner-token" }
+        )
+
+        let payload = try await client.uniOpsRuntimeApprovals(tenantID: "aljamri")
+
+        XCTAssertEqual(payload.approvals.count, 1)
+        XCTAssertEqual(payload.approvals.first?.id, "approval-1")
+        XCTAssertEqual(payload.approvals.first?.category, "payment")
+    }
+
+    func testUniOpsNightShiftImprovementDecisionUsesCamelCaseBody() async throws {
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.path, "/api/admin/nightshift/improvements/decision")
+            XCTAssertEqual(request.httpMethod, "POST")
+
+            let body = try XCTUnwrap(apiTestBodyData(from: request))
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["proposalKey"] as? String, "0123456789012345678901234567890123456789")
+            XCTAssertEqual(json["decision"] as? String, "approved")
+            XCTAssertEqual(json["botId"] as? String, "nightshift-reviewer")
+            XCTAssertEqual(json["feedbackNote"] as? String, "Reviewed from iPhone")
+            XCTAssertNil(json["proposal_key"])
+            XCTAssertNil(json["feedback_note"])
+
+            return apiTestJSONResponse("""
+            {
+              "ok": true,
+              "data": {
+                "result": {
+                  "updated": {
+                    "proposalKey": "0123456789012345678901234567890123456789",
+                    "title": "Tighten payment proof",
+                    "status": "approved"
+                  }
+                }
+              }
+            }
+            """, for: request)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let client = APIClient(
+            baseURL: URL(string: "https://example.test")!,
+            session: URLSession(configuration: configuration),
+            bearerTokenProvider: { "owner-token" }
+        )
+
+        let response = try await client.decideUniOpsNightShiftImprovement(
+            proposalKey: "0123456789012345678901234567890123456789",
+            decision: "approved",
+            botId: "nightshift-reviewer",
+            feedbackNote: "Reviewed from iPhone"
+        )
+
+        XCTAssertEqual(response.ok, true)
+        XCTAssertEqual(response.data?.result?.updated?.status, "approved")
+    }
+
     func testVanishedSessionResponseUsesRecoveryMessage() async throws {
         let client = makeClient { request in
             let response = HTTPURLResponse(

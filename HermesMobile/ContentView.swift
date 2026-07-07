@@ -208,8 +208,14 @@ private struct UniOpsDashboardView: View {
 
     @Environment(\.locale) private var locale
     @State private var sessions: [UniOpsMobileSession] = []
+    @State private var tenantID = "aljamri"
+    @State private var runtimeApprovals: [UniOpsRuntimeApproval] = []
+    @State private var improvementProposals: [UniOpsNightShiftImprovement] = []
+    @State private var skillCards: [UniOpsNightShiftSkillCard] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var actionMessage: String?
+    @State private var pendingDecision: UniOpsPendingDecision?
 
     private var layoutDirection: LayoutDirection {
         UniOpsLocalePolicy.layoutDirection(for: locale)
@@ -218,6 +224,10 @@ private struct UniOpsDashboardView: View {
     private var currentSession: UniOpsMobileSession? {
         guard let id = authManager.currentUniOpsSessionID else { return nil }
         return sessions.first { $0.id == id }
+    }
+
+    private var approvalCount: Int {
+        runtimeApprovals.count + improvementProposals.count + skillCards.count
     }
 
     var body: some View {
@@ -229,8 +239,41 @@ private struct UniOpsDashboardView: View {
                     dashboardRow(title: String(localized: "Active Sessions"), value: "\(sessions.count)")
                     dashboardRow(title: String(localized: "Channel"), value: currentSession?.channel ?? String(localized: "Mobile owner console"))
                     dashboardRow(title: String(localized: "Token Class"), value: currentSession?.tokenClass ?? String(localized: "Founder"))
+                    dashboardRow(title: String(localized: "Waiting Approvals"), value: "\(approvalCount)")
                 } header: {
                     Text("Dashboard Summary")
+                }
+
+                Section {
+                    TextField("Tenant", text: $tenantID)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit {
+                            Task { await load() }
+                        }
+                } header: {
+                    Text("Runtime Tenant")
+                }
+
+                Section {
+                    if approvalCount == 0 {
+                        Text("No approvals are waiting.")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    ForEach(Array(runtimeApprovals.prefix(5))) { approval in
+                        runtimeApprovalRow(approval)
+                    }
+
+                    ForEach(Array(improvementProposals.prefix(5))) { proposal in
+                        improvementProposalRow(proposal)
+                    }
+
+                    ForEach(Array(skillCards.prefix(5))) { card in
+                        skillCardRow(card)
+                    }
+                } header: {
+                    Text("Approvals")
                 }
 
                 Section {
@@ -244,6 +287,13 @@ private struct UniOpsDashboardView: View {
                         Task { await load() }
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                }
+
+                if let actionMessage {
+                    Section {
+                        Text(actionMessage)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -274,6 +324,26 @@ private struct UniOpsDashboardView: View {
             .refreshable {
                 await load()
             }
+            .confirmationDialog(
+                pendingDecision?.confirmationTitle ?? String(localized: "Confirm Owner Action"),
+                isPresented: Binding(
+                    get: { pendingDecision != nil },
+                    set: { isPresented in
+                        if !isPresented { pendingDecision = nil }
+                    }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingDecision
+            ) { decision in
+                Button(decision.actionLabel, role: decision.buttonRole) {
+                    Task { await perform(decision) }
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDecision = nil
+                }
+            } message: { decision in
+                Text(decision.confirmationMessage)
+            }
         }
         .environment(\.layoutDirection, layoutDirection)
     }
@@ -291,6 +361,125 @@ private struct UniOpsDashboardView: View {
         .padding(.vertical, 3)
     }
 
+    private func runtimeApprovalRow(_ approval: UniOpsRuntimeApproval) -> some View {
+        approvalRow(
+            systemImage: "person.crop.circle.badge.checkmark",
+            title: approval.reason ?? approval.category ?? approval.id,
+            subtitle: approval.taskId ?? approval.status ?? String(localized: "Runtime approval"),
+            badges: [approval.category, approval.status].compactMap { $0 },
+            approve: .runtime(id: approval.id, subject: approval.reason ?? approval.id, approved: true),
+            reject: .runtime(id: approval.id, subject: approval.reason ?? approval.id, approved: false)
+        )
+    }
+
+    private func improvementProposalRow(_ proposal: UniOpsNightShiftImprovement) -> some View {
+        approvalRow(
+            systemImage: "moon.stars",
+            title: proposal.title ?? proposal.proposalKey,
+            subtitle: proposal.displaySummary ?? proposal.kind ?? String(localized: "NightShift improvement"),
+            badges: [proposal.risk, proposal.projectScope, proposal.status].compactMap { $0 },
+            approve: .improvement(
+                proposalKey: proposal.proposalKey,
+                botId: proposal.botId,
+                subject: proposal.title ?? proposal.proposalKey,
+                decision: "approved"
+            ),
+            reject: .improvement(
+                proposalKey: proposal.proposalKey,
+                botId: proposal.botId,
+                subject: proposal.title ?? proposal.proposalKey,
+                decision: "rejected"
+            )
+        )
+    }
+
+    private func skillCardRow(_ card: UniOpsNightShiftSkillCard) -> some View {
+        approvalRow(
+            systemImage: "sparkles",
+            title: card.title ?? card.skillKey,
+            subtitle: card.rationale ?? card.action ?? String(localized: "NightShift skill card"),
+            badges: [card.scope, card.status].compactMap { $0 },
+            approve: .skill(
+                skillKey: card.skillKey,
+                botId: card.botId,
+                subject: card.title ?? card.skillKey,
+                action: "approve"
+            ),
+            reject: .skill(
+                skillKey: card.skillKey,
+                botId: card.botId,
+                subject: card.title ?? card.skillKey,
+                action: "reject"
+            )
+        )
+    }
+
+    private func approvalRow(
+        systemImage: String,
+        title: String,
+        subtitle: String,
+        badges: [String],
+        approve: UniOpsPendingDecision,
+        reject: UniOpsPendingDecision
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label {
+                Text(verbatim: title)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: systemImage)
+                    .foregroundStyle(.blue)
+            }
+
+            Text(verbatim: subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !badges.isEmpty {
+                ViewThatFits(in: .horizontal) {
+                    HStack {
+                        ForEach(badges, id: \.self) { badge in
+                            Text(verbatim: badge)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    }
+                    VStack(alignment: .leading) {
+                        ForEach(badges, id: \.self) { badge in
+                            Text(verbatim: badge)
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.quaternary, in: Capsule())
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Button(role: .destructive) {
+                    pendingDecision = reject
+                } label: {
+                    Label("Reject", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+
+                Button {
+                    pendingDecision = approve
+                } label: {
+                    Label("Approve", systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .labelStyle(.titleAndIcon)
+        }
+        .padding(.vertical, 6)
+    }
+
     @MainActor
     private func load() async {
         isLoading = true
@@ -298,7 +487,47 @@ private struct UniOpsDashboardView: View {
         defer { isLoading = false }
 
         do {
-            sessions = try await authManager.loadUniOpsSessions().sessions
+            let snapshot = try await authManager.loadUniOpsApprovalInbox(tenantID: tenantID)
+            sessions = snapshot.sessions
+            runtimeApprovals = snapshot.runtimeApprovals
+            improvementProposals = snapshot.improvementProposals
+            skillCards = snapshot.skillCards
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func perform(_ decision: UniOpsPendingDecision) async {
+        isLoading = true
+        errorMessage = nil
+        actionMessage = nil
+        pendingDecision = nil
+        defer { isLoading = false }
+
+        do {
+            switch decision {
+            case let .runtime(id, _, approved):
+                try await authManager.decideUniOpsRuntimeApproval(
+                    id: id,
+                    tenantID: tenantID,
+                    approved: approved
+                )
+            case let .improvement(proposalKey, botId, _, decision):
+                try await authManager.decideUniOpsNightShiftImprovement(
+                    proposalKey: proposalKey,
+                    decision: decision,
+                    botId: botId
+                )
+            case let .skill(skillKey, botId, _, action):
+                try await authManager.decideUniOpsNightShiftSkill(
+                    skillKey: skillKey,
+                    action: action,
+                    botId: botId
+                )
+            }
+            actionMessage = String(localized: "Decision Sent")
+            await load()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -312,6 +541,82 @@ private struct UniOpsDashboardView: View {
                 UIApplication.shared.registerForRemoteNotifications()
             }
         }
+    }
+}
+
+enum UniOpsPendingDecision: Identifiable, Equatable {
+    case runtime(id: String, subject: String, approved: Bool)
+    case improvement(proposalKey: String, botId: String?, subject: String, decision: String)
+    case skill(skillKey: String, botId: String?, subject: String, action: String)
+
+    var id: String {
+        switch self {
+        case let .runtime(id, _, approved):
+            return "runtime-\(id)-\(approved)"
+        case let .improvement(proposalKey, _, _, decision):
+            return "improvement-\(proposalKey)-\(decision)"
+        case let .skill(skillKey, _, _, action):
+            return "skill-\(skillKey)-\(action)"
+        }
+    }
+
+    var subject: String {
+        switch self {
+        case let .runtime(_, subject, _),
+            let .improvement(_, _, subject, _),
+            let .skill(_, _, subject, _):
+            return subject
+        }
+    }
+
+    var actionLabel: String {
+        switch self {
+        case let .runtime(_, _, approved):
+            return approved ? String(localized: "Approve") : String(localized: "Reject")
+        case let .improvement(_, _, _, decision):
+            return decision == "approved" ? String(localized: "Approve") : String(localized: "Reject")
+        case let .skill(_, _, _, action):
+            return action == "approve" ? String(localized: "Approve") : String(localized: "Reject")
+        }
+    }
+
+    var buttonRole: ButtonRole? {
+        actionLabel == String(localized: "Reject") ? .destructive : nil
+    }
+
+    var confirmationTitle: String {
+        UniOpsOwnerActionPolicy.requiresFounderConfirmation(text: subject)
+            ? String(localized: "Founder Confirmation Required")
+            : String(localized: "Confirm Owner Action")
+    }
+
+    var confirmationMessage: String {
+        UniOpsOwnerActionPolicy.requiresFounderConfirmation(text: subject)
+            ? String(localized: "This action mentions protected operations. Confirm from trusted evidence before deciding.")
+            : String(localized: "Confirm this approval decision.")
+    }
+}
+
+enum UniOpsOwnerActionPolicy {
+    private static let protectedTerms = [
+        "delete",
+        "deploy",
+        "production",
+        "payment",
+        "payroll",
+        "secret",
+        "credential",
+        "dns",
+        "iam",
+        "firewall",
+        "customer",
+        "legal",
+        "refund"
+    ]
+
+    static func requiresFounderConfirmation(text: String) -> Bool {
+        let lowered = text.lowercased()
+        return protectedTerms.contains { lowered.contains($0) }
     }
 }
 

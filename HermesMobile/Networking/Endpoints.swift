@@ -105,6 +105,15 @@ enum Endpoint {
     case uniOpsMobileSessionRevoke(id: String)
     case uniOpsMobileRefresh
     case uniOpsMobilePushToken
+    case uniOpsRuntimeApprovals
+    case uniOpsRuntimeApprovalDecision(id: String)
+    case uniOpsNightShiftImprovements(status: String?, limit: Int)
+    case uniOpsNightShiftImprovementDecision
+    case uniOpsNightShiftSkills(status: String?, scope: String?, limit: Int)
+    case uniOpsNightShiftSkillDecision
+    case uniOpsOpenClawPendingActionDecision(id: String, action: String)
+    case uniOpsAutopilotActionDecision(runID: String, actionID: String)
+    case uniOpsGitHubEscrowDecision(intentID: String, action: String)
 
     var path: String {
         switch self {
@@ -316,6 +325,24 @@ enum Endpoint {
             return "/api/auth/mobile/refresh"
         case .uniOpsMobilePushToken:
             return "/api/admin/mobile/push-token"
+        case .uniOpsRuntimeApprovals:
+            return "/api/admin/agents/runtime/approvals"
+        case .uniOpsRuntimeApprovalDecision(let id):
+            return "/api/admin/agents/runtime/approvals/\(Self.pathComponent(id))/decision"
+        case .uniOpsNightShiftImprovements:
+            return "/api/admin/nightshift/improvements"
+        case .uniOpsNightShiftImprovementDecision:
+            return "/api/admin/nightshift/improvements/decision"
+        case .uniOpsNightShiftSkills:
+            return "/api/admin/nightshift/skills"
+        case .uniOpsNightShiftSkillDecision:
+            return "/api/admin/nightshift/skills/decision"
+        case let .uniOpsOpenClawPendingActionDecision(id, action):
+            return "/api/admin/agents/openclaw/pending-actions/\(Self.pathComponent(id))/\(Self.pathComponent(action))"
+        case let .uniOpsAutopilotActionDecision(runID, actionID):
+            return "/api/admin/autopilots/runs/\(Self.pathComponent(runID))/actions/\(Self.pathComponent(actionID))/approve"
+        case let .uniOpsGitHubEscrowDecision(intentID, action):
+            return "/api/admin/integrations/github/escrow/\(Self.pathComponent(intentID))/\(Self.pathComponent(action))"
         }
     }
 
@@ -438,6 +465,21 @@ enum Endpoint {
                 items.append(URLQueryItem(name: "file", value: file))
             }
             return items
+        case let .uniOpsNightShiftImprovements(status, limit):
+            var items = [URLQueryItem(name: "limit", value: "\(limit)")]
+            if let status, !status.isEmpty {
+                items.append(URLQueryItem(name: "status", value: status))
+            }
+            return items
+        case let .uniOpsNightShiftSkills(status, scope, limit):
+            var items = [URLQueryItem(name: "limit", value: "\(limit)")]
+            if let status, !status.isEmpty {
+                items.append(URLQueryItem(name: "status", value: status))
+            }
+            if let scope, !scope.isEmpty {
+                items.append(URLQueryItem(name: "scope", value: scope))
+            }
+            return items
         default:
             return []
         }
@@ -452,5 +494,11 @@ enum Endpoint {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.queryItems = queryItems
         return components?.url ?? url
+    }
+
+    private static func pathComponent(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
