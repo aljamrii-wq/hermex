@@ -1815,8 +1815,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				GENERATE_INFOPLIST_FILE = NO;
-				GOOGLE_SIGN_IN_CLIENT_ID = "";
-				GOOGLE_SIGN_IN_REVERSED_CLIENT_ID = "";
+				GOOGLE_SIGN_IN_CLIENT_ID = "227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap.apps.googleusercontent.com";
+				GOOGLE_SIGN_IN_REVERSED_CLIENT_ID = "com.googleusercontent.apps.227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap";
 				INFOPLIST_FILE = HermesMobile/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1846,8 +1846,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				GENERATE_INFOPLIST_FILE = NO;
-				GOOGLE_SIGN_IN_CLIENT_ID = "";
-				GOOGLE_SIGN_IN_REVERSED_CLIENT_ID = "";
+				GOOGLE_SIGN_IN_CLIENT_ID = "227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap.apps.googleusercontent.com";
+				GOOGLE_SIGN_IN_REVERSED_CLIENT_ID = "com.googleusercontent.apps.227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap";
 				INFOPLIST_FILE = HermesMobile/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
