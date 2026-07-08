@@ -50,6 +50,15 @@ Full plan (read it first): in the uniops repo,
 > Even Hub) is out of scope for this — it is unaffected regardless of which phone app pairs to
 > the glasses.
 
+> **Addendum (2026-07-08) — the Phase 1 re-point above is drafted, not verified.** Claude pushed
+> commit `8bcae6a` on this branch doing exactly the re-point this file's §2/§4 describe:
+> `Endpoints.swift`, `ServerInfo.swift`, `APIClient.swift`, `AuthManager.swift`, `ContentView.swift`,
+> and both test files were all rewritten against the unified `GET /api/admin/approvals`. This was
+> done by code tracing + structural review only — **there is no Xcode/Swift toolchain in that
+> sandbox, so none of it has been compiled or run.** Your first job is not to write the re-point;
+> it's to build it, fix whatever doesn't compile, and prove it on a simulator/device. See the
+> rewritten `CODEX-KICKOFF.md` — it now asks for a build-and-verify pass, not a rewrite.
+
 ## 2. What is already DONE (server-side, by Claude) — uniops PR #229
 
 The backend unblocker is merged-ready on branch `claude/uniops-ios-control-plane-kzsnpj`. All of it is verified: `tsc --noEmit` clean, migrations applied to a real Postgres, contract tests green. You do **not** need to build any of this — just call it.
@@ -124,16 +133,21 @@ Work in `HermesMobile/`. The layers to change:
 Build in this order; each phase is a sideload build for the owner.
 
 - **iOS Phase 0 — Auth + shell.** Google Sign-In → `/api/auth/mobile/session` bearer; Keychain + Face ID; refresh-on-401; fixed User-Agent; Tailscale reachability (hermex already allows plain HTTP on `100.64.0.0/10` — extend to the UniOps host); register APNs token. Ship a signed-in dashboard-summary screen (authenticated proof — not signed-out).
-- **iOS Phase 1 — Approvals MVP ("approve UniOps from your phone").** One inbox over the unified
-  `GET /api/admin/approvals` (see §2) — **not** the individual per-source routes. Render `items`
+- **iOS Phase 1 — Approvals MVP ("approve UniOps from your phone"). Drafted (commit `8bcae6a`),
+  needs a Mac to build/verify — see the addendum above.** One inbox over the unified
+  `GET /api/admin/approvals` (see §2) — **not** the individual per-source routes. Renders `items`
   grouped/badged by `source` (openclaw — incl. escrow — / agent_runtime / autopilot / supplier_ops;
   **no NightShift**); tapping approve/deny POSTs exactly the item's `decide.approve`/`.deny` `{url,
   body}` (+ `headers` if present, + the owner's note under `reasonField` if the UI collects one).
-  Mirror the owner-confirmation triggers from §2 before sending any decision. `stepUp: true` items
-  are covered by a fresh/refreshed mobile token. Badge count: poll `?countOnly=1`.
+  Mirrors the owner-confirmation triggers from §2 before sending any decision. `stepUp: true` items
+  are covered by a fresh/refreshed mobile token. Badge count: `uniOpsApprovalCounts()` polls
+  `?countOnly=1` (wired in `APIClient`, not yet called from any UI timer — a Phase 1 nice-to-have,
+  not required for MVP). **Remaining before Phase 1 is done:** `xcodebuild build`/`test`, prove
+  EN/AR RTL on the approvals screen, confirm the Reject button correctly hides itself when an
+  item's `decide.deny` is null.
   Action Center + live feed: `GET /api/stream`, `GET /api/admin/realtime/stream` (SSE; **cookie-auth
-  only today — add a bearer variant server-side or poll + APNs wake**).
-  Live Activity for a running agent task; APNs push wakes it.
+  only today — add a bearer variant server-side or poll + APNs wake**) — not started.
+  Live Activity for a running agent task; APNs push wakes it — not started.
 - **iOS Phase 2 — Agent console.** Reuse hermex's chat/steer-stop/sessions/tasks/skills/files against the Hermes agent gateway.
 - **iOS Phase 3 — Fleet Ops (ops repo surfaces, monitoring-first), product consoles (Finance/Travel/Inbox/Compliance). See the plan.**
 - **iOS Phase 4 — Device control, full Aura parity.** Glasses BLE + LC3 mic + on-lens HUD + ASR +
