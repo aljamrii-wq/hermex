@@ -28,6 +28,21 @@ Full plan (read it first): in the uniops repo,
 > Everything else you built (auth shell, Keychain, Face ID, bearer+refresh, APNs, dashboard proof,
 > owner-confirmation gate, EN/AR/RTL) is unaffected and correct.
 
+> **Addendum (2026-07-08) — one app, not two.** The owner does not want a separate Aura app on
+> their phone. Aura's Flutter phone companion (`aljamrigroup/aura`) is a **wind-down source**:
+> Phase 4 (§4 below) must reach full native feature parity with it — not just lift its BLE
+> plumbing — and once that ships, the Aura Flutter app is archived. `aura#148` (open,
+> `claude/hermes-glasses-integration-5puzw3`) is the concrete parity spec: translate mode (EN/AR,
+> auto-detect), a Flipper Zero Favorites list gated nod-to-launch/shake-to-cancel, and a
+> look-and-translate camera-OCR page. The native Swift files to lift wholesale from
+> `aura/ios/Runner/` are `BluetoothManager.swift`, `SpeechStreamRecognizer.swift`,
+> `PcmConverter.m`/`.h`, `lc3/`, `FlipperBluetoothBridge.swift`, `ServiceIdentifiers.swift`,
+> `GattProtocal.swift` — the Dart UI/orchestration on top of them gets reimplemented natively in
+> SwiftUI, using `aura#148`'s behavior as the spec. This does not change Phase 0/1 scope; it's a
+> heads-up for Phase 4 sequencing. `aura-sdk` (the TypeScript SDK that runs *on* the glasses via
+> Even Hub) is out of scope for this — it is unaffected regardless of which phone app pairs to
+> the glasses.
+
 ## 2. What is already DONE (server-side, by Claude) — uniops PR #229
 
 The backend unblocker is merged-ready on branch `claude/uniops-ios-control-plane-kzsnpj`. All of it is verified: `tsc --noEmit` clean, migrations applied to a real Postgres, contract tests green. You do **not** need to build any of this — just call it.
@@ -113,7 +128,13 @@ Build in this order; each phase is a sideload build for the owner.
   only today — add a bearer variant server-side or poll + APNs wake**).
   Live Activity for a running agent task; APNs push wakes it.
 - **iOS Phase 2 — Agent console.** Reuse hermex's chat/steer-stop/sessions/tasks/skills/files against the Hermes agent gateway.
-- **iOS Phase 3+ — Fleet Ops (ops repo surfaces, monitoring-first), product consoles (Finance/Travel/Inbox/Compliance), device control (glasses/Flipper/camera). See the plan.**
+- **iOS Phase 3 — Fleet Ops (ops repo surfaces, monitoring-first), product consoles (Finance/Travel/Inbox/Compliance). See the plan.**
+- **iOS Phase 4 — Device control, full Aura parity.** Glasses BLE + LC3 mic + on-lens HUD + ASR +
+  translate mode (EN/AR) + look-and-translate (camera OCR); Flipper Zero nod-gated Favorites launch
+  / shake-cancels transmit; camera transports. Lift the native Swift files from `aura/ios/Runner/`
+  listed in the addendum above; reimplement the Dart UI/orchestration from `aura#148` natively.
+  **Exit criterion:** the owner can do everything Aura does today, from inside this app. Once
+  verified, the Aura Flutter app is archived (`aura-sdk` on-glass runtime is untouched).
 
 ## 5. Constraints (non-negotiable)
 
@@ -140,4 +161,6 @@ Follow `DEVELOPMENT.md` (post-change flow) and `CONTRACT_TESTS.md` (tolerant dec
 - Approvals aggregator (source of the item/decide contract): `uniops` → `lib/approvals/{service,types}.ts`
 - Session store / policy: `uniops` → `lib/mobile-operator-console/{session,authorize,google-owner}.ts`; APNs `lib/mobile-push/apns.ts`
 - This app's source of truth: `PROJECT_SPEC.md`, `DEVELOPMENT.md`, `AGENTS.md`
+- Aura parity spec (Phase 4): `aljamrigroup/aura` PR #148 (`claude/hermes-glasses-integration-5puzw3`)
+  + native files under `aura/ios/Runner/` — see the 2026-07-08 addendum above.
 - Branch convention: develop on `claude/uniops-ios-control-plane-kzsnpj`; open draft PRs.
