@@ -416,122 +416,43 @@ extension APIClient {
         )
     }
 
-    func uniOpsRuntimeApprovals(tenantID: String) async throws -> UniOpsRuntimeApprovalsPayload {
-        let response: UniOpsAPIResponse<UniOpsRuntimeApprovalsPayload> = try await sendUniOps(
-            endpoint: .uniOpsRuntimeApprovals,
-            method: "GET",
-            additionalHeaders: ["x-tenant-id": tenantID]
-        )
-        return response.data ?? UniOpsRuntimeApprovalsPayload()
-    }
-
-    func decideUniOpsRuntimeApproval(
-        id: String,
-        tenantID: String,
-        approved: Bool,
-        decisionNote: String? = nil
-    ) async throws -> UniOpsAPIResponse<UniOpsRuntimeApprovalDecisionPayload> {
-        try await sendUniOps(
-            endpoint: .uniOpsRuntimeApprovalDecision(id: id),
-            method: "POST",
-            body: UniOpsRuntimeApprovalDecisionRequest(
-                approved: approved,
-                decisionNote: decisionNote
-            ),
-            additionalHeaders: ["x-tenant-id": tenantID]
-        )
-    }
-
-    func uniOpsNightShiftImprovements(
-        status: String? = nil,
-        limit: Int = 20
-    ) async throws -> UniOpsNightShiftImprovementsPayload {
-        let response: UniOpsAPIResponse<UniOpsNightShiftImprovementsPayload> = try await sendUniOps(
-            endpoint: .uniOpsNightShiftImprovements(status: status, limit: limit),
+    /// Fetches the unified Approvals Command Center snapshot. `source` filters
+    /// to one bucket (`openclaw`/`agent_runtime`/`autopilot`/`supplier_ops`);
+    /// pass `nil` for everything. This single call replaces the old separate
+    /// runtime/NightShift/OpenClaw/autopilot/escrow fetches.
+    func uniOpsApprovals(source: String? = nil, limit: Int? = nil) async throws -> UniOpsApprovalsPayload {
+        let response: UniOpsAPIResponse<UniOpsApprovalsPayload> = try await sendUniOps(
+            endpoint: .uniOpsApprovals(source: source, countOnly: false, limit: limit),
             method: "GET"
         )
-        return response.data ?? UniOpsNightShiftImprovementsPayload()
+        return response.data ?? UniOpsApprovalsPayload()
     }
 
-    func decideUniOpsNightShiftImprovement(
-        proposalKey: String,
-        decision: String,
-        botId: String? = nil,
-        feedbackNote: String? = nil
-    ) async throws -> UniOpsAPIResponse<UniOpsNightShiftImprovementDecisionPayload> {
-        try await sendUniOps(
-            endpoint: .uniOpsNightShiftImprovementDecision,
-            method: "POST",
-            body: UniOpsNightShiftImprovementDecisionRequest(
-                proposalKey: proposalKey,
-                decision: decision,
-                botId: botId,
-                feedbackNote: feedbackNote
-            )
-        )
-    }
-
-    func uniOpsNightShiftSkills(
-        status: String? = nil,
-        scope: String? = nil,
-        limit: Int = 20
-    ) async throws -> UniOpsNightShiftSkillsPayload {
-        let response: UniOpsAPIResponse<UniOpsNightShiftSkillsPayload> = try await sendUniOps(
-            endpoint: .uniOpsNightShiftSkills(status: status, scope: scope, limit: limit),
+    /// Badge/poll variant — `{ counts, generatedAt }` only, no `items`.
+    func uniOpsApprovalCounts(source: String? = nil) async throws -> UniOpsApprovalCounts {
+        let response: UniOpsAPIResponse<UniOpsApprovalsPayload> = try await sendUniOps(
+            endpoint: .uniOpsApprovals(source: source, countOnly: true, limit: nil),
             method: "GET"
         )
-        return response.data ?? UniOpsNightShiftSkillsPayload()
+        return response.data?.counts ?? UniOpsApprovalCounts()
     }
 
-    func decideUniOpsNightShiftSkill(
-        skillKey: String,
-        action: String,
-        botId: String? = nil
-    ) async throws -> UniOpsAPIResponse<UniOpsNightShiftSkillDecisionPayload> {
-        try await sendUniOps(
-            endpoint: .uniOpsNightShiftSkillDecision,
-            method: "POST",
-            body: UniOpsNightShiftSkillDecisionRequest(
-                skillKey: skillKey,
-                action: action,
-                botId: botId
-            )
-        )
-    }
-
-    func decideUniOpsOpenClawPendingAction(
-        id: String,
-        action: String,
-        reason: String? = nil
+    /// Approves or denies a `PendingApprovalItem` by POSTing exactly the
+    /// server-supplied `decide.approve`/`decide.deny` url/body/headers —
+    /// never a hand-constructed per-source request. `reason`, if the item's
+    /// `decide.reasonField` is non-nil, is merged into the body under that key.
+    func decideUniOpsApproval(
+        _ action: UniOpsApprovalDecideAction,
+        headers: [String: String] = [:],
+        reason: String? = nil,
+        reasonField: String? = nil
     ) async throws -> UniOpsDecisionResponse {
-        try await sendUniOps(
-            endpoint: .uniOpsOpenClawPendingActionDecision(id: id, action: action),
+        let body = (action.body ?? .object([:])).mergingReason(reason, field: reasonField)
+        return try await sendUniOps(
+            endpoint: .uniOpsApprovalDecision(path: action.url),
             method: "POST",
-            body: UniOpsReasonRequest(reason: reason)
-        )
-    }
-
-    func decideUniOpsAutopilotAction(
-        runID: String,
-        actionID: String,
-        approved: Bool
-    ) async throws -> UniOpsAPIResponse<UniOpsDecisionPayload> {
-        try await sendUniOps(
-            endpoint: .uniOpsAutopilotActionDecision(runID: runID, actionID: actionID),
-            method: "POST",
-            body: UniOpsAutopilotActionDecisionRequest(approved: approved)
-        )
-    }
-
-    func decideUniOpsGitHubEscrow(
-        intentID: String,
-        action: String,
-        reason: String? = nil
-    ) async throws -> UniOpsDecisionResponse {
-        try await sendUniOps(
-            endpoint: .uniOpsGitHubEscrowDecision(intentID: intentID, action: action),
-            method: "POST",
-            body: UniOpsReasonRequest(reason: reason)
+            body: body,
+            additionalHeaders: headers
         )
     }
 }

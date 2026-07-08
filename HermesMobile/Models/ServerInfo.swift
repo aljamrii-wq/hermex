@@ -256,367 +256,196 @@ struct UniOpsDecisionResponse: Decodable, Equatable {
     }
 }
 
-struct UniOpsDecisionPayload: Decodable, Equatable {}
-
-struct UniOpsRuntimeApprovalsPayload: Decodable, Equatable {
-    let approvals: [UniOpsRuntimeApproval]
+/// Unified Approvals Command Center (`uniops#226`) — one shape covering every
+/// source (`openclaw` incl. GitHub escrow, `agent_runtime`, `autopilot`,
+/// `supplier_ops`). Supersedes the old per-source Runtime/NightShift/
+/// OpenClaw/Autopilot/Escrow payload zoo. NightShift is intentionally not a
+/// source here.
+struct UniOpsApprovalsPayload: Decodable, Equatable {
+    let items: [PendingApprovalItem]
+    let counts: UniOpsApprovalCounts
+    let generatedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case approvals
+        case items
+        case counts
+        case generatedAt
     }
 
-    init(approvals: [UniOpsRuntimeApproval] = []) {
-        self.approvals = approvals
+    init(
+        items: [PendingApprovalItem] = [],
+        counts: UniOpsApprovalCounts = UniOpsApprovalCounts(),
+        generatedAt: String? = nil
+    ) {
+        self.items = items
+        self.counts = counts
+        self.generatedAt = generatedAt
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        approvals = (try? container.decodeIfPresent([UniOpsRuntimeApproval].self, forKey: .approvals)) ?? []
+        items = (try? container.decodeIfPresent([PendingApprovalItem].self, forKey: .items)) ?? []
+        counts = (try? container.decodeIfPresent(UniOpsApprovalCounts.self, forKey: .counts)) ?? UniOpsApprovalCounts()
+        generatedAt = container.decodeLossyStringIfPresent(forKey: .generatedAt)
     }
 }
 
-struct UniOpsRuntimeApproval: Decodable, Equatable, Identifiable {
+struct UniOpsApprovalCounts: Decodable, Equatable {
+    let total: Int
+    let bySource: [String: Int]
+
+    enum CodingKeys: String, CodingKey {
+        case total
+        case bySource
+    }
+
+    init(total: Int = 0, bySource: [String: Int] = [:]) {
+        self.total = total
+        self.bySource = bySource
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        total = container.decodeLossyIntIfPresent(forKey: .total) ?? 0
+        bySource = (try? container.decodeIfPresent([String: Int].self, forKey: .bySource)) ?? [:]
+    }
+}
+
+/// `source: "openclaw"` items with a title prefixed `GitHub · ...` are escrow
+/// decisions — approve/deny still routes through `decide`, same as any other
+/// OpenClaw item. There is no separate escrow case to branch on client-side.
+struct PendingApprovalItem: Decodable, Equatable, Identifiable {
     let id: String
-    let tenantId: String?
-    let taskId: String?
-    let category: String?
-    let reason: String?
-    let status: String?
+    let source: String
+    let title: String?
+    let description: String?
+    let riskTier: String?
     let requestedBy: String?
-    let createdAt: String?
-    let updatedAt: String?
+    let requestedAt: String?
+    let stepUp: Bool
+    let href: String?
+    let decide: UniOpsApprovalDecideActions
+
+    var displayTitle: String { title ?? id }
+    var displaySubtitle: String { description ?? source }
 
     enum CodingKeys: String, CodingKey {
         case id
-        case tenantId
-        case taskId
-        case category
-        case reason
-        case status
+        case source
+        case title
+        case description
+        case riskTier
         case requestedBy
-        case createdAt
-        case updatedAt
-    }
-
-    init(
-        id: String,
-        tenantId: String? = nil,
-        taskId: String? = nil,
-        category: String? = nil,
-        reason: String? = nil,
-        status: String? = nil,
-        requestedBy: String? = nil,
-        createdAt: String? = nil,
-        updatedAt: String? = nil
-    ) {
-        self.id = id
-        self.tenantId = tenantId
-        self.taskId = taskId
-        self.category = category
-        self.reason = reason
-        self.status = status
-        self.requestedBy = requestedBy
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
+        case requestedAt
+        case stepUp
+        case href
+        case decide
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = container.decodeLossyStringIfPresent(forKey: .id) ?? ""
-        tenantId = container.decodeLossyStringIfPresent(forKey: .tenantId)
-        taskId = container.decodeLossyStringIfPresent(forKey: .taskId)
-        category = container.decodeLossyStringIfPresent(forKey: .category)
-        reason = container.decodeLossyStringIfPresent(forKey: .reason)
-        status = container.decodeLossyStringIfPresent(forKey: .status)
+        source = container.decodeLossyStringIfPresent(forKey: .source) ?? "openclaw"
+        title = container.decodeLossyStringIfPresent(forKey: .title)
+        description = container.decodeLossyStringIfPresent(forKey: .description)
+        riskTier = container.decodeLossyStringIfPresent(forKey: .riskTier)
         requestedBy = container.decodeLossyStringIfPresent(forKey: .requestedBy)
-        createdAt = container.decodeLossyStringIfPresent(forKey: .createdAt)
-        updatedAt = container.decodeLossyStringIfPresent(forKey: .updatedAt)
+        requestedAt = container.decodeLossyStringIfPresent(forKey: .requestedAt)
+        stepUp = (try? container.decodeIfPresent(Bool.self, forKey: .stepUp)) ?? false
+        href = container.decodeLossyStringIfPresent(forKey: .href)
+        decide = (try? container.decodeIfPresent(UniOpsApprovalDecideActions.self, forKey: .decide))
+            ?? UniOpsApprovalDecideActions()
     }
 }
 
-struct UniOpsRuntimeApprovalDecisionRequest: Encodable {
-    let approved: Bool
-    let decisionNote: String?
-}
-
-struct UniOpsRuntimeApprovalDecisionPayload: Decodable, Equatable {
-    let approval: UniOpsRuntimeApproval?
+/// Carries the exact `{url, body}` (+ optional headers/reasonField) the app
+/// must POST verbatim on approve/deny — the client never hand-constructs a
+/// per-source request shape.
+struct UniOpsApprovalDecideActions: Decodable, Equatable {
+    let approve: UniOpsApprovalDecideAction?
+    let deny: UniOpsApprovalDecideAction?
+    let headers: [String: String]
+    let reasonField: String?
 
     enum CodingKeys: String, CodingKey {
-        case approval
+        case approve
+        case deny
+        case headers
+        case reasonField
+    }
+
+    init(
+        approve: UniOpsApprovalDecideAction? = nil,
+        deny: UniOpsApprovalDecideAction? = nil,
+        headers: [String: String] = [:],
+        reasonField: String? = nil
+    ) {
+        self.approve = approve
+        self.deny = deny
+        self.headers = headers
+        self.reasonField = reasonField
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        approval = try? container.decodeIfPresent(UniOpsRuntimeApproval.self, forKey: .approval)
+        approve = try? container.decodeIfPresent(UniOpsApprovalDecideAction.self, forKey: .approve)
+        deny = try? container.decodeIfPresent(UniOpsApprovalDecideAction.self, forKey: .deny)
+        headers = (try? container.decodeIfPresent([String: String].self, forKey: .headers)) ?? [:]
+        reasonField = container.decodeLossyStringIfPresent(forKey: .reasonField)
     }
 }
 
-struct UniOpsNightShiftImprovementsPayload: Decodable, Equatable {
-    let result: UniOpsNightShiftImprovementList?
-
-    var proposals: [UniOpsNightShiftImprovement] {
-        result?.proposals ?? []
-    }
+struct UniOpsApprovalDecideAction: Decodable, Equatable {
+    let url: String
+    let body: JSONValue?
 
     enum CodingKeys: String, CodingKey {
-        case result
+        case url
+        case body
     }
 
-    init(result: UniOpsNightShiftImprovementList? = nil) {
-        self.result = result
+    init(url: String, body: JSONValue? = nil) {
+        self.url = url
+        self.body = body
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        result = try? container.decodeIfPresent(UniOpsNightShiftImprovementList.self, forKey: .result)
+        url = container.decodeLossyStringIfPresent(forKey: .url) ?? ""
+        body = try? container.decodeIfPresent(JSONValue.self, forKey: .body)
     }
 }
 
-struct UniOpsNightShiftImprovementList: Decodable, Equatable {
-    let botId: String?
-    let count: Int?
-    let proposals: [UniOpsNightShiftImprovement]
-
-    enum CodingKeys: String, CodingKey {
-        case botId
-        case count
-        case proposals
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        botId = container.decodeLossyStringIfPresent(forKey: .botId)
-        count = container.decodeLossyIntIfPresent(forKey: .count)
-        proposals = (try? container.decodeIfPresent([UniOpsNightShiftImprovement].self, forKey: .proposals)) ?? []
-    }
-}
-
-struct UniOpsNightShiftImprovement: Decodable, Equatable, Identifiable {
-    let proposalKey: String
-    let botId: String?
-    let kind: String?
-    let title: String?
-    let summary: String?
-    let status: String?
-    let verificationStatus: String?
-    let details: Details?
-
-    var id: String { proposalKey }
-    var displaySummary: String? { summary ?? details?.summary ?? details?.suggestedAction }
-    var risk: String? { details?.risk }
-    var projectScope: String? { details?.projectScope }
-
-    struct Details: Decodable, Equatable {
-        let projectScope: String?
-        let risk: String?
-        let summary: String?
-        let suggestedAction: String?
-
-        enum CodingKeys: String, CodingKey {
-            case projectScope
-            case risk
-            case summary
-            case suggestedAction
+extension JSONValue {
+    /// Merges an owner-supplied note into a decide-action body under the
+    /// server-specified `reasonField` key (`"reason"` / `"decisionNote"` /
+    /// nil — nil means this source doesn't accept a note). Non-destructive:
+    /// starts from `self` if it's already an object, otherwise an empty one.
+    func mergingReason(_ reason: String?, field: String?) -> JSONValue {
+        guard let field, let reason, !reason.isEmpty else { return self }
+        var dict: [String: JSONValue]
+        if case let .object(existing) = self {
+            dict = existing
+        } else {
+            dict = [:]
         }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            projectScope = container.decodeLossyStringIfPresent(forKey: .projectScope)
-            risk = container.decodeLossyStringIfPresent(forKey: .risk)
-            summary = container.decodeLossyStringIfPresent(forKey: .summary)
-            suggestedAction = container.decodeLossyStringIfPresent(forKey: .suggestedAction)
-        }
+        dict[field] = .string(reason)
+        return .object(dict)
     }
-
-    enum CodingKeys: String, CodingKey {
-        case proposalKey
-        case botId
-        case kind
-        case title
-        case summary
-        case status
-        case verificationStatus
-        case details
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        proposalKey = container.decodeLossyStringIfPresent(forKey: .proposalKey) ?? ""
-        botId = container.decodeLossyStringIfPresent(forKey: .botId)
-        kind = container.decodeLossyStringIfPresent(forKey: .kind)
-        title = container.decodeLossyStringIfPresent(forKey: .title)
-        summary = container.decodeLossyStringIfPresent(forKey: .summary)
-        status = container.decodeLossyStringIfPresent(forKey: .status)
-        verificationStatus = container.decodeLossyStringIfPresent(forKey: .verificationStatus)
-        details = try? container.decodeIfPresent(Details.self, forKey: .details)
-    }
-}
-
-struct UniOpsNightShiftImprovementDecisionRequest: Encodable {
-    let proposalKey: String
-    let decision: String
-    let botId: String?
-    let feedbackNote: String?
-}
-
-struct UniOpsNightShiftImprovementDecisionPayload: Decodable, Equatable {
-    let result: UniOpsNightShiftImprovementDecisionResult?
-
-    enum CodingKeys: String, CodingKey {
-        case result
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        result = try? container.decodeIfPresent(UniOpsNightShiftImprovementDecisionResult.self, forKey: .result)
-    }
-}
-
-struct UniOpsNightShiftImprovementDecisionResult: Decodable, Equatable {
-    let updated: UniOpsNightShiftImprovement?
-
-    enum CodingKeys: String, CodingKey {
-        case updated
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        updated = try? container.decodeIfPresent(UniOpsNightShiftImprovement.self, forKey: .updated)
-    }
-}
-
-struct UniOpsNightShiftSkillsPayload: Decodable, Equatable {
-    let result: UniOpsNightShiftSkillList?
-
-    var cards: [UniOpsNightShiftSkillCard] {
-        result?.cards ?? []
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case result
-    }
-
-    init(result: UniOpsNightShiftSkillList? = nil) {
-        self.result = result
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        result = try? container.decodeIfPresent(UniOpsNightShiftSkillList.self, forKey: .result)
-    }
-}
-
-struct UniOpsNightShiftSkillList: Decodable, Equatable {
-    let botId: String?
-    let count: Int?
-    let cards: [UniOpsNightShiftSkillCard]
-
-    enum CodingKeys: String, CodingKey {
-        case botId
-        case count
-        case cards
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        botId = container.decodeLossyStringIfPresent(forKey: .botId)
-        count = container.decodeLossyIntIfPresent(forKey: .count)
-        cards = (try? container.decodeIfPresent([UniOpsNightShiftSkillCard].self, forKey: .cards)) ?? []
-    }
-}
-
-struct UniOpsNightShiftSkillCard: Decodable, Equatable, Identifiable {
-    let skillKey: String
-    let botId: String?
-    let scope: String?
-    let title: String?
-    let action: String?
-    let rationale: String?
-    let status: String?
-    let updatedAt: String?
-
-    var id: String { skillKey }
-
-    enum CodingKeys: String, CodingKey {
-        case skillKey
-        case botId
-        case scope
-        case title
-        case action
-        case rationale
-        case status
-        case updatedAt
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        skillKey = container.decodeLossyStringIfPresent(forKey: .skillKey) ?? ""
-        botId = container.decodeLossyStringIfPresent(forKey: .botId)
-        scope = container.decodeLossyStringIfPresent(forKey: .scope)
-        title = container.decodeLossyStringIfPresent(forKey: .title)
-        action = container.decodeLossyStringIfPresent(forKey: .action)
-        rationale = container.decodeLossyStringIfPresent(forKey: .rationale)
-        status = container.decodeLossyStringIfPresent(forKey: .status)
-        updatedAt = container.decodeLossyStringIfPresent(forKey: .updatedAt)
-    }
-}
-
-struct UniOpsNightShiftSkillDecisionRequest: Encodable {
-    let skillKey: String
-    let action: String
-    let botId: String?
-}
-
-struct UniOpsNightShiftSkillDecisionPayload: Decodable, Equatable {
-    let result: UniOpsNightShiftSkillDecisionResult?
-
-    enum CodingKeys: String, CodingKey {
-        case result
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        result = try? container.decodeIfPresent(UniOpsNightShiftSkillDecisionResult.self, forKey: .result)
-    }
-}
-
-struct UniOpsNightShiftSkillDecisionResult: Decodable, Equatable {
-    let updated: UniOpsNightShiftSkillCard?
-
-    enum CodingKeys: String, CodingKey {
-        case updated
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        updated = try? container.decodeIfPresent(UniOpsNightShiftSkillCard.self, forKey: .updated)
-    }
-}
-
-struct UniOpsReasonRequest: Encodable {
-    let reason: String?
-}
-
-struct UniOpsAutopilotActionDecisionRequest: Encodable {
-    let approved: Bool
 }
 
 struct UniOpsApprovalInboxSnapshot: Equatable {
     let sessions: [UniOpsMobileSession]
-    let runtimeApprovals: [UniOpsRuntimeApproval]
-    let improvementProposals: [UniOpsNightShiftImprovement]
-    let skillCards: [UniOpsNightShiftSkillCard]
+    let items: [PendingApprovalItem]
+    let counts: UniOpsApprovalCounts
 
     init(
         sessions: [UniOpsMobileSession] = [],
-        runtimeApprovals: [UniOpsRuntimeApproval] = [],
-        improvementProposals: [UniOpsNightShiftImprovement] = [],
-        skillCards: [UniOpsNightShiftSkillCard] = []
+        items: [PendingApprovalItem] = [],
+        counts: UniOpsApprovalCounts = UniOpsApprovalCounts()
     ) {
         self.sessions = sessions
-        self.runtimeApprovals = runtimeApprovals
-        self.improvementProposals = improvementProposals
-        self.skillCards = skillCards
+        self.items = items
+        self.counts = counts
     }
 }

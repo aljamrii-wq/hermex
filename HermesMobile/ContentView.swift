@@ -208,10 +208,7 @@ private struct UniOpsDashboardView: View {
 
     @Environment(\.locale) private var locale
     @State private var sessions: [UniOpsMobileSession] = []
-    @State private var tenantID = "aljamri"
-    @State private var runtimeApprovals: [UniOpsRuntimeApproval] = []
-    @State private var improvementProposals: [UniOpsNightShiftImprovement] = []
-    @State private var skillCards: [UniOpsNightShiftSkillCard] = []
+    @State private var approvals: [PendingApprovalItem] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var actionMessage: String?
@@ -227,7 +224,7 @@ private struct UniOpsDashboardView: View {
     }
 
     private var approvalCount: Int {
-        runtimeApprovals.count + improvementProposals.count + skillCards.count
+        approvals.count
     }
 
     var body: some View {
@@ -245,32 +242,13 @@ private struct UniOpsDashboardView: View {
                 }
 
                 Section {
-                    TextField("Tenant", text: $tenantID)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .onSubmit {
-                            Task { await load() }
-                        }
-                } header: {
-                    Text("Runtime Tenant")
-                }
-
-                Section {
                     if approvalCount == 0 {
                         Text("No approvals are waiting.")
                             .foregroundStyle(.secondary)
                     }
 
-                    ForEach(Array(runtimeApprovals.prefix(5))) { approval in
-                        runtimeApprovalRow(approval)
-                    }
-
-                    ForEach(Array(improvementProposals.prefix(5))) { proposal in
-                        improvementProposalRow(proposal)
-                    }
-
-                    ForEach(Array(skillCards.prefix(5))) { card in
-                        skillCardRow(card)
+                    ForEach(Array(approvals.prefix(20))) { item in
+                        approvalItemRow(item)
                     }
                 } header: {
                     Text("Approvals")
@@ -361,57 +339,49 @@ private struct UniOpsDashboardView: View {
         .padding(.vertical, 3)
     }
 
-    private func runtimeApprovalRow(_ approval: UniOpsRuntimeApproval) -> some View {
+    private func approvalItemRow(_ item: PendingApprovalItem) -> some View {
         approvalRow(
-            systemImage: "person.crop.circle.badge.checkmark",
-            title: approval.reason ?? approval.category ?? approval.id,
-            subtitle: approval.taskId ?? approval.status ?? String(localized: "Runtime approval"),
-            badges: [approval.category, approval.status].compactMap { $0 },
-            approve: .runtime(id: approval.id, subject: approval.reason ?? approval.id, approved: true),
-            reject: .runtime(id: approval.id, subject: approval.reason ?? approval.id, approved: false)
+            systemImage: sourceSystemImage(item.source),
+            title: item.displayTitle,
+            subtitle: item.description ?? sourceLabel(item.source),
+            badges: [sourceLabel(item.source), item.riskTier].compactMap { $0 },
+            approve: .decide(item: item, approved: true),
+            canReject: item.decide.deny != nil,
+            reject: .decide(item: item, approved: false)
         )
     }
 
-    private func improvementProposalRow(_ proposal: UniOpsNightShiftImprovement) -> some View {
-        approvalRow(
-            systemImage: "moon.stars",
-            title: proposal.title ?? proposal.proposalKey,
-            subtitle: proposal.displaySummary ?? proposal.kind ?? String(localized: "NightShift improvement"),
-            badges: [proposal.risk, proposal.projectScope, proposal.status].compactMap { $0 },
-            approve: .improvement(
-                proposalKey: proposal.proposalKey,
-                botId: proposal.botId,
-                subject: proposal.title ?? proposal.proposalKey,
-                decision: "approved"
-            ),
-            reject: .improvement(
-                proposalKey: proposal.proposalKey,
-                botId: proposal.botId,
-                subject: proposal.title ?? proposal.proposalKey,
-                decision: "rejected"
-            )
-        )
+    /// `source` values come from the unified Approvals Command Center
+    /// (`openclaw` — includes GitHub escrow, `agent_runtime`, `autopilot`,
+    /// `supplier_ops`). NightShift is not a source here.
+    private func sourceSystemImage(_ source: String) -> String {
+        switch source {
+        case "openclaw":
+            return "person.crop.circle.badge.checkmark"
+        case "agent_runtime":
+            return "cpu"
+        case "autopilot":
+            return "gearshape.2"
+        case "supplier_ops":
+            return "building.2"
+        default:
+            return "checkmark.seal"
+        }
     }
 
-    private func skillCardRow(_ card: UniOpsNightShiftSkillCard) -> some View {
-        approvalRow(
-            systemImage: "sparkles",
-            title: card.title ?? card.skillKey,
-            subtitle: card.rationale ?? card.action ?? String(localized: "NightShift skill card"),
-            badges: [card.scope, card.status].compactMap { $0 },
-            approve: .skill(
-                skillKey: card.skillKey,
-                botId: card.botId,
-                subject: card.title ?? card.skillKey,
-                action: "approve"
-            ),
-            reject: .skill(
-                skillKey: card.skillKey,
-                botId: card.botId,
-                subject: card.title ?? card.skillKey,
-                action: "reject"
-            )
-        )
+    private func sourceLabel(_ source: String) -> String {
+        switch source {
+        case "openclaw":
+            return String(localized: "OpenClaw")
+        case "agent_runtime":
+            return String(localized: "Agent Runtime")
+        case "autopilot":
+            return String(localized: "Autopilot")
+        case "supplier_ops":
+            return String(localized: "Supplier Ops")
+        default:
+            return source
+        }
     }
 
     private func approvalRow(
@@ -420,6 +390,7 @@ private struct UniOpsDashboardView: View {
         subtitle: String,
         badges: [String],
         approve: UniOpsPendingDecision,
+        canReject: Bool,
         reject: UniOpsPendingDecision
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -461,12 +432,14 @@ private struct UniOpsDashboardView: View {
             }
 
             HStack {
-                Button(role: .destructive) {
-                    pendingDecision = reject
-                } label: {
-                    Label("Reject", systemImage: "xmark.circle")
+                if canReject {
+                    Button(role: .destructive) {
+                        pendingDecision = reject
+                    } label: {
+                        Label("Reject", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
 
                 Button {
                     pendingDecision = approve
@@ -487,11 +460,9 @@ private struct UniOpsDashboardView: View {
         defer { isLoading = false }
 
         do {
-            let snapshot = try await authManager.loadUniOpsApprovalInbox(tenantID: tenantID)
+            let snapshot = try await authManager.loadUniOpsApprovalInbox()
             sessions = snapshot.sessions
-            runtimeApprovals = snapshot.runtimeApprovals
-            improvementProposals = snapshot.improvementProposals
-            skillCards = snapshot.skillCards
+            approvals = snapshot.items
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -507,24 +478,8 @@ private struct UniOpsDashboardView: View {
 
         do {
             switch decision {
-            case let .runtime(id, _, approved):
-                try await authManager.decideUniOpsRuntimeApproval(
-                    id: id,
-                    tenantID: tenantID,
-                    approved: approved
-                )
-            case let .improvement(proposalKey, botId, _, decision):
-                try await authManager.decideUniOpsNightShiftImprovement(
-                    proposalKey: proposalKey,
-                    decision: decision,
-                    botId: botId
-                )
-            case let .skill(skillKey, botId, _, action):
-                try await authManager.decideUniOpsNightShiftSkill(
-                    skillKey: skillKey,
-                    action: action,
-                    botId: botId
-                )
+            case let .decide(item, approved):
+                try await authManager.decideUniOpsApproval(item, approved: approved)
             }
             actionMessage = String(localized: "Decision Sent")
             await load()
@@ -545,38 +500,28 @@ private struct UniOpsDashboardView: View {
 }
 
 enum UniOpsPendingDecision: Identifiable, Equatable {
-    case runtime(id: String, subject: String, approved: Bool)
-    case improvement(proposalKey: String, botId: String?, subject: String, decision: String)
-    case skill(skillKey: String, botId: String?, subject: String, action: String)
+    case decide(item: PendingApprovalItem, approved: Bool)
 
     var id: String {
         switch self {
-        case let .runtime(id, _, approved):
-            return "runtime-\(id)-\(approved)"
-        case let .improvement(proposalKey, _, _, decision):
-            return "improvement-\(proposalKey)-\(decision)"
-        case let .skill(skillKey, _, _, action):
-            return "skill-\(skillKey)-\(action)"
+        case let .decide(item, approved):
+            return "\(item.id)-\(approved)"
         }
     }
 
+    /// Fed to `UniOpsOwnerActionPolicy.requiresFounderConfirmation` — mirrors
+    /// the backend's owner-confirmation triggers over the item's full text.
     var subject: String {
         switch self {
-        case let .runtime(_, subject, _),
-            let .improvement(_, _, subject, _),
-            let .skill(_, _, subject, _):
-            return subject
+        case let .decide(item, _):
+            return [item.displayTitle, item.description].compactMap { $0 }.joined(separator: " ")
         }
     }
 
     var actionLabel: String {
         switch self {
-        case let .runtime(_, _, approved):
+        case let .decide(_, approved):
             return approved ? String(localized: "Approve") : String(localized: "Reject")
-        case let .improvement(_, _, _, decision):
-            return decision == "approved" ? String(localized: "Approve") : String(localized: "Reject")
-        case let .skill(_, _, _, action):
-            return action == "approve" ? String(localized: "Approve") : String(localized: "Reject")
         }
     }
 

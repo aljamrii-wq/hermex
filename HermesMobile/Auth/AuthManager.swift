@@ -250,42 +250,36 @@ final class AuthManager {
         return try await makeUniOpsAPIClient(server: server).uniOpsMobileSessions()
     }
 
-    func loadUniOpsApprovalInbox(tenantID: String) async throws -> UniOpsApprovalInboxSnapshot {
+    func loadUniOpsApprovalInbox() async throws -> UniOpsApprovalInboxSnapshot {
         let client = try signedInUniOpsAPIClient()
         async let sessions = client.uniOpsMobileSessions()
-        async let runtimeApprovals = client.uniOpsRuntimeApprovals(tenantID: tenantID)
-        async let improvements = client.uniOpsNightShiftImprovements(status: "approval_required", limit: 20)
-        async let skills = client.uniOpsNightShiftSkills(status: "discovered", scope: nil, limit: 20)
+        async let approvals = client.uniOpsApprovals()
 
-        return try await UniOpsApprovalInboxSnapshot(
-            sessions: sessions.sessions,
-            runtimeApprovals: runtimeApprovals.approvals,
-            improvementProposals: improvements.proposals,
-            skillCards: skills.cards
+        let (sessionsResult, approvalsResult) = try await (sessions, approvals)
+        return UniOpsApprovalInboxSnapshot(
+            sessions: sessionsResult.sessions,
+            items: approvalsResult.items,
+            counts: approvalsResult.counts
         )
     }
 
-    func decideUniOpsRuntimeApproval(id: String, tenantID: String, approved: Bool) async throws {
-        _ = try await signedInUniOpsAPIClient()
-            .decideUniOpsRuntimeApproval(id: id, tenantID: tenantID, approved: approved)
-    }
-
-    func decideUniOpsNightShiftImprovement(
-        proposalKey: String,
-        decision: String,
-        botId: String?
-    ) async throws {
-        _ = try await signedInUniOpsAPIClient()
-            .decideUniOpsNightShiftImprovement(
-                proposalKey: proposalKey,
-                decision: decision,
-                botId: botId
-            )
-    }
-
-    func decideUniOpsNightShiftSkill(skillKey: String, action: String, botId: String?) async throws {
-        _ = try await signedInUniOpsAPIClient()
-            .decideUniOpsNightShiftSkill(skillKey: skillKey, action: action, botId: botId)
+    /// Approves or denies a unified `PendingApprovalItem`. `reason` is only
+    /// sent when the item's `decide.reasonField` is non-nil.
+    func decideUniOpsApproval(_ item: PendingApprovalItem, approved: Bool, reason: String? = nil) async throws {
+        guard let action = approved ? item.decide.approve : item.decide.deny else {
+            // No deny action means this source doesn't support rejecting —
+            // the caller (ContentView) should not have offered a reject button.
+            throw APIError.decoding(underlying: DecodingError.valueNotFound(
+                UniOpsApprovalDecideAction.self,
+                DecodingError.Context(codingPath: [], debugDescription: "Missing decide action for \(item.id)")
+            ))
+        }
+        _ = try await signedInUniOpsAPIClient().decideUniOpsApproval(
+            action,
+            headers: item.decide.headers,
+            reason: reason,
+            reasonField: item.decide.reasonField
+        )
     }
 
     func registerUniOpsPushToken(_ token: String) async {

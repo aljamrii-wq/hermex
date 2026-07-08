@@ -180,11 +180,10 @@ final class APIClientAuthAndErrorTests: APIClientTestCase {
         XCTAssertTrue(didRefresh)
     }
 
-    func testUniOpsRuntimeApprovalsUseTenantHeaderAndDecodeEnvelope() async throws {
+    func testUniOpsApprovalsDecodesUnifiedEnvelope() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.path, "/api/admin/agents/runtime/approvals")
+            XCTAssertEqual(request.url?.path, "/api/admin/approvals")
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "x-tenant-id"), "aljamri")
             XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), APIClient.fixedUserAgent)
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer owner-token")
 
@@ -192,17 +191,26 @@ final class APIClientAuthAndErrorTests: APIClientTestCase {
             {
               "ok": true,
               "data": {
-                "approvals": [
+                "items": [
                   {
-                    "id": "approval-1",
-                    "tenantId": "aljamri",
-                    "taskId": "task-1",
-                    "category": "payment",
-                    "reason": "Approve supplier refund",
-                    "status": "pending",
-                    "requestedBy": "nightshift"
+                    "id": "openclaw:approval-1",
+                    "source": "openclaw",
+                    "title": "GitHub \u{b7} Merge dev to main",
+                    "description": "Approve supplier refund",
+                    "riskTier": "medium",
+                    "requestedBy": "nightshift",
+                    "requestedAt": "2026-07-01T00:00:00.000Z",
+                    "stepUp": false,
+                    "href": "/admin/agents/openclaw",
+                    "decide": {
+                      "approve": { "url": "/api/admin/agents/openclaw/pending-actions/approval-1/approve", "body": {} },
+                      "deny": { "url": "/api/admin/agents/openclaw/pending-actions/approval-1/deny", "body": {} },
+                      "reasonField": "reason"
+                    }
                   }
-                ]
+                ],
+                "counts": { "total": 1, "bySource": { "openclaw": 1 } },
+                "generatedAt": "2026-07-01T00:00:05.000Z"
               }
             }
             """, for: request)
@@ -216,40 +224,31 @@ final class APIClientAuthAndErrorTests: APIClientTestCase {
             bearerTokenProvider: { "owner-token" }
         )
 
-        let payload = try await client.uniOpsRuntimeApprovals(tenantID: "aljamri")
+        let payload = try await client.uniOpsApprovals()
 
-        XCTAssertEqual(payload.approvals.count, 1)
-        XCTAssertEqual(payload.approvals.first?.id, "approval-1")
-        XCTAssertEqual(payload.approvals.first?.category, "payment")
+        XCTAssertEqual(payload.items.count, 1)
+        XCTAssertEqual(payload.items.first?.id, "openclaw:approval-1")
+        XCTAssertEqual(payload.items.first?.source, "openclaw")
+        XCTAssertEqual(payload.counts.total, 1)
+        XCTAssertEqual(
+            payload.items.first?.decide.approve?.url,
+            "/api/admin/agents/openclaw/pending-actions/approval-1/approve"
+        )
     }
 
-    func testUniOpsNightShiftImprovementDecisionUsesCamelCaseBody() async throws {
+    func testDecideUniOpsApprovalPostsServerSuppliedURLAndMergesReason() async throws {
         MockURLProtocol.requestHandler = { request in
-            XCTAssertEqual(request.url?.path, "/api/admin/nightshift/improvements/decision")
+            XCTAssertEqual(request.url?.path, "/api/admin/agents/runtime/approvals/approval-9/decision")
             XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "x-tenant-id"), "aljamri")
 
             let body = try XCTUnwrap(apiTestBodyData(from: request))
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
-            XCTAssertEqual(json["proposalKey"] as? String, "0123456789012345678901234567890123456789")
-            XCTAssertEqual(json["decision"] as? String, "approved")
-            XCTAssertEqual(json["botId"] as? String, "nightshift-reviewer")
-            XCTAssertEqual(json["feedbackNote"] as? String, "Reviewed from iPhone")
-            XCTAssertNil(json["proposal_key"])
-            XCTAssertNil(json["feedback_note"])
+            XCTAssertEqual(json["approved"] as? Bool, true)
+            XCTAssertEqual(json["decisionNote"] as? String, "Reviewed from iPhone")
 
             return apiTestJSONResponse("""
-            {
-              "ok": true,
-              "data": {
-                "result": {
-                  "updated": {
-                    "proposalKey": "0123456789012345678901234567890123456789",
-                    "title": "Tighten payment proof",
-                    "status": "approved"
-                  }
-                }
-              }
-            }
+            { "ok": true, "success": true }
             """, for: request)
         }
 
@@ -261,15 +260,20 @@ final class APIClientAuthAndErrorTests: APIClientTestCase {
             bearerTokenProvider: { "owner-token" }
         )
 
-        let response = try await client.decideUniOpsNightShiftImprovement(
-            proposalKey: "0123456789012345678901234567890123456789",
-            decision: "approved",
-            botId: "nightshift-reviewer",
-            feedbackNote: "Reviewed from iPhone"
+        let action = UniOpsApprovalDecideAction(
+            url: "/api/admin/agents/runtime/approvals/approval-9/decision",
+            body: .object(["approved": .bool(true)])
+        )
+
+        let response = try await client.decideUniOpsApproval(
+            action,
+            headers: ["x-tenant-id": "aljamri"],
+            reason: "Reviewed from iPhone",
+            reasonField: "decisionNote"
         )
 
         XCTAssertEqual(response.ok, true)
-        XCTAssertEqual(response.data?.result?.updated?.status, "approved")
+        XCTAssertEqual(response.success, true)
     }
 
     func testVanishedSessionResponseUsesRecoveryMessage() async throws {
