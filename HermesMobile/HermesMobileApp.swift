@@ -1,10 +1,12 @@
 import SwiftUI
 import SwiftData
+import UIKit
 
 @main
 struct HermesMobileApp: App {
     @State private var authManager = AuthManager()
     @AppStorage(AppTheme.storageKey) private var appThemeRawValue = AppTheme.system.rawValue
+    @UIApplicationDelegateAdaptor(UniOpsAppDelegate.self) private var appDelegate
 
     var body: some Scene {
         WindowGroup {
@@ -26,5 +28,15 @@ struct HermesMobileApp: App {
             #endif
         }
         .modelContainer(for: [CachedSession.self, CachedMessage.self])
+    }
+}
+
+final class UniOpsAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let token = deviceToken.map { String(format: "%02x", $0) }.joined()
+        NotificationCenter.default.post(name: .uniOpsAPNsTokenDidChange, object: token)
     }
 }

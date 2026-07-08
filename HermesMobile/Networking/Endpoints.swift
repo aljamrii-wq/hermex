@@ -101,6 +101,20 @@ enum Endpoint {
     case upload
     case transcribe
     case tts
+    case uniOpsMobileSession
+    case uniOpsMobileSessionRevoke(id: String)
+    case uniOpsMobileRefresh
+    case uniOpsMobilePushToken
+    /// Unified Approvals Command Center (`uniops#226`). Supersedes the old
+    /// per-source runtime/NightShift/OpenClaw/autopilot/escrow endpoints —
+    /// GitHub escrow surfaces as `source: "openclaw"`, NightShift is not a
+    /// source here at all.
+    case uniOpsApprovals(source: String?, countOnly: Bool, limit: Int?)
+    /// POSTs to the server-supplied `decide.approve`/`decide.deny` path on a
+    /// `PendingApprovalItem` verbatim — the server tells the client what to
+    /// call, so this wraps an arbitrary already-relative path rather than
+    /// modelling each source's decision route as its own case.
+    case uniOpsApprovalDecision(path: String)
 
     var path: String {
         switch self {
@@ -304,7 +318,25 @@ enum Endpoint {
             return "/api/transcribe"
         case .tts:
             return "/api/tts"
+        case .uniOpsMobileSession:
+            return "/api/auth/mobile/session"
+        case .uniOpsMobileSessionRevoke(let id):
+            return "/api/auth/mobile/session/\(id)"
+        case .uniOpsMobileRefresh:
+            return "/api/auth/mobile/refresh"
+        case .uniOpsMobilePushToken:
+            return "/api/admin/mobile/push-token"
+        case .uniOpsApprovals:
+            return "/api/admin/approvals"
+        case let .uniOpsApprovalDecision(path):
+            // Already a complete, ready-to-use relative path from the server's
+            // own PendingApprovalItem.decide.approve/deny.url — do not re-encode.
+            return path
         }
+    }
+
+    var isUniOpsAdminEndpoint: Bool {
+        path.hasPrefix("/api/admin/")
     }
 
     var queryItems: [URLQueryItem] {
@@ -422,6 +454,18 @@ enum Endpoint {
                 items.append(URLQueryItem(name: "file", value: file))
             }
             return items
+        case let .uniOpsApprovals(source, countOnly, limit):
+            var items: [URLQueryItem] = []
+            if let source, !source.isEmpty {
+                items.append(URLQueryItem(name: "source", value: source))
+            }
+            if countOnly {
+                items.append(URLQueryItem(name: "countOnly", value: "1"))
+            }
+            if let limit {
+                items.append(URLQueryItem(name: "limit", value: "\(limit)"))
+            }
+            return items
         default:
             return []
         }
@@ -436,5 +480,11 @@ enum Endpoint {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         components?.queryItems = queryItems
         return components?.url ?? url
+    }
+
+    private static func pathComponent(_ value: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove("/")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }

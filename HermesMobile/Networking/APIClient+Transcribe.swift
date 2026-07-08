@@ -16,7 +16,7 @@ extension APIClient {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         // Custom headers first, then built-ins so the multipart Content-Type
         // always wins. Same reverse proxy requirement as uploadFile (#61).
-        customHeaderProvider().apply(to: &request)
+        await applyStandardHeaders(to: &request)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()

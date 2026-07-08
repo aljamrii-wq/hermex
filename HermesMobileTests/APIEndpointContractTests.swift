@@ -13,6 +13,31 @@ final class ContractReadinessTests: XCTestCase {
             .init(name: "auth status", method: "GET", endpoint: .authStatus, path: "/api/auth/status"),
             .init(name: "login", method: "POST", endpoint: .login, path: "/api/auth/login"),
             .init(name: "logout", method: "POST", endpoint: .logout, path: "/api/auth/logout"),
+            .init(name: "UniOps mobile session", method: "POST", endpoint: .uniOpsMobileSession, path: "/api/auth/mobile/session"),
+            .init(name: "UniOps mobile refresh", method: "POST", endpoint: .uniOpsMobileRefresh, path: "/api/auth/mobile/refresh"),
+            .init(name: "UniOps mobile push token", method: "POST", endpoint: .uniOpsMobilePushToken, path: "/api/admin/mobile/push-token"),
+            .init(name: "UniOps mobile revoke", method: "DELETE", endpoint: .uniOpsMobileSessionRevoke(id: "session-123"), path: "/api/auth/mobile/session/session-123"),
+            .init(name: "UniOps approvals", method: "GET", endpoint: .uniOpsApprovals(source: nil, countOnly: false, limit: nil), path: "/api/admin/approvals"),
+            .init(
+                name: "UniOps approvals filtered by source",
+                method: "GET",
+                endpoint: .uniOpsApprovals(source: "openclaw", countOnly: false, limit: 50),
+                path: "/api/admin/approvals",
+                query: ["source": "openclaw", "limit": "50"]
+            ),
+            .init(
+                name: "UniOps approvals count-only",
+                method: "GET",
+                endpoint: .uniOpsApprovals(source: nil, countOnly: true, limit: nil),
+                path: "/api/admin/approvals",
+                query: ["countOnly": "1"]
+            ),
+            .init(
+                name: "UniOps approval decision (server-supplied path passthrough)",
+                method: "POST",
+                endpoint: .uniOpsApprovalDecision(path: "/api/admin/agents/openclaw/pending-actions/pending-123/approve"),
+                path: "/api/admin/agents/openclaw/pending-actions/pending-123/approve"
+            ),
             .init(name: "sessions", method: "GET", endpoint: .sessions(), path: "/api/sessions"),
             .init(
                 name: "sessions including archived",
@@ -272,7 +297,7 @@ final class ContractReadinessTests: XCTestCase {
 
             XCTAssertEqual(components.path, contract.path, contract.name)
             XCTAssertEqual(queryDictionary(from: components), contract.query, contract.name)
-            XCTAssertTrue(["GET", "POST"].contains(contract.method), contract.name)
+            XCTAssertTrue(["GET", "POST", "DELETE"].contains(contract.method), contract.name)
         }
     }
 

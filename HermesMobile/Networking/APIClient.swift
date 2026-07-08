@@ -16,20 +16,29 @@ actor APIClient {
     private let ownedSessions: [URLSession]
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let uniOpsEncoder: JSONEncoder
     /// Read when building each request so live edits apply without rebuilding the
     /// client. Defaults to the process-wide store; tests inject a fixed list (#255).
     /// Internal, not private, because the upload and transcribe extensions build
     /// their multipart requests by hand and need the same header injection (#61).
     let customHeaderProvider: @Sendable () -> [CustomHeader]
+    private let bearerTokenProvider: @Sendable () async -> String?
+    private let mobileRefreshHandler: @Sendable () async throws -> String?
+
+    nonisolated static let fixedUserAgent = "UniOpsFounderIOS/0.1 HermesMobile/1.4"
 
     init(
         baseURL: URL,
         session: URLSession? = nil,
         publicMediaSession: URLSession? = nil,
-        customHeaderProvider: @escaping @Sendable () -> [CustomHeader] = { CustomHeaderStore.shared.snapshot() }
+        customHeaderProvider: @escaping @Sendable () -> [CustomHeader] = { CustomHeaderStore.shared.snapshot() },
+        bearerTokenProvider: @escaping @Sendable () async -> String? = { nil },
+        mobileRefreshHandler: @escaping @Sendable () async throws -> String? = { nil }
     ) {
         self.baseURL = baseURL
         self.customHeaderProvider = customHeaderProvider
+        self.bearerTokenProvider = bearerTokenProvider
+        self.mobileRefreshHandler = mobileRefreshHandler
 
         // One redirect guard shared by both sessions (same origin + same header
         // provider). Wired into the default sessions so a server-issued
@@ -60,6 +69,8 @@ actor APIClient {
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
         self.encoder = encoder
+
+        self.uniOpsEncoder = JSONEncoder()
     }
 
     deinit {
@@ -111,6 +122,36 @@ actor APIClient {
         return try decode(Response.self, from: data)
     }
 
+    func sendUniOps<Response: Decodable, Body: Encodable>(
+        endpoint: Endpoint,
+        method: String,
+        body: Body?,
+        additionalHeaders: [String: String] = [:]
+    ) async throws -> Response {
+        let encodedBody = try body.map { try uniOpsEncoder.encode($0) }
+        let data = try await sendData(
+            endpoint: endpoint,
+            method: method,
+            encodedBody: encodedBody,
+            additionalHeaders: additionalHeaders
+        )
+        return try decode(Response.self, from: data)
+    }
+
+    func sendUniOps<Response: Decodable>(
+        endpoint: Endpoint,
+        method: String,
+        additionalHeaders: [String: String] = [:]
+    ) async throws -> Response {
+        let data = try await sendData(
+            endpoint: endpoint,
+            method: method,
+            encodedBody: nil,
+            additionalHeaders: additionalHeaders
+        )
+        return try decode(Response.self, from: data)
+    }
+
     func decode<Response: Decodable>(_ type: Response.Type, from data: Data) throws -> Response {
         do {
             return try decoder.decode(Response.self, from: data)
@@ -139,13 +180,15 @@ actor APIClient {
         endpoint: Endpoint,
         method: String,
         encodedBody: Data?,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        additionalHeaders: [String: String] = [:]
     ) async throws -> Data {
         try await sendDataReturningResponse(
             endpoint: endpoint,
             method: method,
             encodedBody: encodedBody,
-            timeout: timeout
+            timeout: timeout,
+            additionalHeaders: additionalHeaders
         ).0
     }
 
@@ -160,7 +203,28 @@ actor APIClient {
         method: String,
         encodedBody: Data?,
         timeout: TimeInterval? = nil,
-        accept: String = "application/json"
+        accept: String = "application/json",
+        additionalHeaders: [String: String] = [:]
+    ) async throws -> (Data, HTTPURLResponse) {
+        try await sendDataReturningResponse(
+            endpoint: endpoint,
+            method: method,
+            encodedBody: encodedBody,
+            timeout: timeout,
+            accept: accept,
+            additionalHeaders: additionalHeaders,
+            hasRetriedAfterRefresh: false
+        )
+    }
+
+    private func sendDataReturningResponse(
+        endpoint: Endpoint,
+        method: String,
+        encodedBody: Data?,
+        timeout: TimeInterval?,
+        accept: String,
+        additionalHeaders: [String: String],
+        hasRetriedAfterRefresh: Bool
     ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: endpoint.url(relativeTo: baseURL))
         request.httpMethod = method
@@ -168,8 +232,11 @@ actor APIClient {
         // Slow server work (e.g. LLM commit-message generation) needs more than the
         // 60s session default, so callers can widen the per-request timeout.
         if let timeout { request.timeoutInterval = timeout }
-        // Custom headers first, then built-ins so Accept/Content-Type always win.
-        customHeaderProvider().apply(to: &request)
+        // Custom headers first, then built-ins/UniOps auth so app-owned headers win.
+        await applyStandardHeaders(to: &request)
+        for (name, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         request.setValue(accept, forHTTPHeaderField: "Accept")
 
         if let encodedBody {
@@ -189,6 +256,21 @@ actor APIClient {
             throw APIError.http(statusCode: -1, body: nil)
         }
 
+        if httpResponse.statusCode == 401,
+           endpoint.isUniOpsAdminEndpoint,
+           hasRetriedAfterRefresh == false,
+           (try await mobileRefreshHandler()) != nil {
+            return try await sendDataReturningResponse(
+                endpoint: endpoint,
+                method: method,
+                encodedBody: encodedBody,
+                timeout: timeout,
+                accept: accept,
+                additionalHeaders: additionalHeaders,
+                hasRetriedAfterRefresh: true
+            )
+        }
+
         if httpResponse.statusCode == 401 {
             throw APIError.unauthorized
         }
@@ -201,6 +283,15 @@ actor APIClient {
         }
 
         return (data, httpResponse)
+    }
+
+    func applyStandardHeaders(to request: inout URLRequest, includeAuthorization: Bool = true) async {
+        customHeaderProvider().apply(to: &request)
+        request.setValue(Self.fixedUserAgent, forHTTPHeaderField: "User-Agent")
+        guard includeAuthorization, let token = await bearerTokenProvider(), !token.isEmpty else {
+            return
+        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     func downloadData(
@@ -218,7 +309,9 @@ actor APIClient {
         // be secrets — that would leak them off-origin. Built-in Accept set after
         // so it wins (#255).
         if Self.isSameOrigin(url, as: baseURL) {
-            customHeaderProvider().apply(to: &request)
+            await applyStandardHeaders(to: &request)
+        } else {
+            request.setValue(Self.fixedUserAgent, forHTTPHeaderField: "User-Agent")
         }
         request.setValue("*/*", forHTTPHeaderField: "Accept")
 
@@ -275,6 +368,92 @@ actor APIClient {
         default:
             return nil
         }
+    }
+}
+
+extension APIClient {
+    func createUniOpsMobileSession(
+        credential: String,
+        deviceId: String?,
+        deviceName: String?
+    ) async throws -> UniOpsMobileSessionResponse {
+        try await sendUniOps(
+            endpoint: .uniOpsMobileSession,
+            method: "POST",
+            body: UniOpsMobileSessionRequest(
+                credential: credential,
+                deviceId: deviceId,
+                deviceName: deviceName
+            )
+        )
+    }
+
+    func uniOpsMobileSessions() async throws -> UniOpsMobileSessionsResponse {
+        try await send(endpoint: .uniOpsMobileSession, method: "GET")
+    }
+
+    func refreshUniOpsMobileSession(refreshToken: String) async throws -> UniOpsMobileRefreshResponse {
+        try await sendUniOps(
+            endpoint: .uniOpsMobileRefresh,
+            method: "POST",
+            body: UniOpsMobileRefreshRequest(refreshToken: refreshToken)
+        )
+    }
+
+    func revokeUniOpsMobileSession(id: String) async throws -> LoginResponse {
+        try await send(endpoint: .uniOpsMobileSessionRevoke(id: id), method: "DELETE")
+    }
+
+    func registerUniOpsPushToken(token: String, deviceId: String?) async throws -> UniOpsMobilePushTokenResponse {
+        try await sendUniOps(
+            endpoint: .uniOpsMobilePushToken,
+            method: "POST",
+            body: UniOpsMobilePushTokenRequest(
+                token: token,
+                deviceId: deviceId,
+                platform: "apns"
+            )
+        )
+    }
+
+    /// Fetches the unified Approvals Command Center snapshot. `source` filters
+    /// to one bucket (`openclaw`/`agent_runtime`/`autopilot`/`supplier_ops`);
+    /// pass `nil` for everything. This single call replaces the old separate
+    /// runtime/NightShift/OpenClaw/autopilot/escrow fetches.
+    func uniOpsApprovals(source: String? = nil, limit: Int? = nil) async throws -> UniOpsApprovalsPayload {
+        let response: UniOpsAPIResponse<UniOpsApprovalsPayload> = try await sendUniOps(
+            endpoint: .uniOpsApprovals(source: source, countOnly: false, limit: limit),
+            method: "GET"
+        )
+        return response.data ?? UniOpsApprovalsPayload()
+    }
+
+    /// Badge/poll variant — `{ counts, generatedAt }` only, no `items`.
+    func uniOpsApprovalCounts(source: String? = nil) async throws -> UniOpsApprovalCounts {
+        let response: UniOpsAPIResponse<UniOpsApprovalsPayload> = try await sendUniOps(
+            endpoint: .uniOpsApprovals(source: source, countOnly: true, limit: nil),
+            method: "GET"
+        )
+        return response.data?.counts ?? UniOpsApprovalCounts()
+    }
+
+    /// Approves or denies a `PendingApprovalItem` by POSTing exactly the
+    /// server-supplied `decide.approve`/`decide.deny` url/body/headers —
+    /// never a hand-constructed per-source request. `reason`, if the item's
+    /// `decide.reasonField` is non-nil, is merged into the body under that key.
+    func decideUniOpsApproval(
+        _ action: UniOpsApprovalDecideAction,
+        headers: [String: String] = [:],
+        reason: String? = nil,
+        reasonField: String? = nil
+    ) async throws -> UniOpsDecisionResponse {
+        let body = (action.body ?? .object([:])).mergingReason(reason, field: reasonField)
+        return try await sendUniOps(
+            endpoint: .uniOpsApprovalDecision(path: action.url),
+            method: "POST",
+            body: body,
+            additionalHeaders: headers
+        )
     }
 }
 

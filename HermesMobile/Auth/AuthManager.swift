@@ -1,5 +1,8 @@
 import Foundation
+import GoogleSignIn
+import LocalAuthentication
 import Observation
+import UIKit
 
 @MainActor
 @Observable
@@ -8,13 +11,19 @@ final class AuthManager {
         case unconfigured
         case loggedOut(server: URL)
         case loggedIn(server: URL)
+        case uniOpsLocked(server: URL)
+        case uniOpsSignedIn(server: URL)
 
         /// The server this state refers to, if any — used to scope sign-out and
         /// session-expiry to the active server (#16). `unconfigured` has none.
         var server: URL? {
             switch self {
             case .unconfigured: return nil
-            case .loggedOut(let server), .loggedIn(let server): return server
+            case .loggedOut(let server),
+                .loggedIn(let server),
+                .uniOpsLocked(let server),
+                .uniOpsSignedIn(let server):
+                return server
             }
         }
     }
@@ -42,6 +51,7 @@ final class AuthManager {
     private let headerStore: CustomHeaderStore
     private let logoutTimeout: Duration
     private let serverRegistry: ServerRegistry
+    private let biometricGate: BiometricGate
 
     init(
         keychain: any KeychainStoring = KeychainStore(),
@@ -51,7 +61,8 @@ final class AuthManager {
         },
         headerStore: CustomHeaderStore = .shared,
         logoutTimeout: Duration = .seconds(5),
-        serverRegistry: ServerRegistry = .shared
+        serverRegistry: ServerRegistry = .shared,
+        biometricGate: BiometricGate = BiometricGate()
     ) {
         self.keychain = keychain
         self.clientFactory = clientFactory
@@ -59,6 +70,7 @@ final class AuthManager {
         self.headerStore = headerStore
         self.logoutTimeout = logoutTimeout
         self.serverRegistry = serverRegistry
+        self.biometricGate = biometricGate
         restoreSavedServer()
         refreshServers()
     }
@@ -77,6 +89,14 @@ final class AuthManager {
     /// and Settings screens.
     var currentCustomHeaders: [CustomHeader] {
         headerStore.snapshot()
+    }
+
+    var currentUniOpsSessionID: String? {
+        try? keychain.load(.uniOpsSessionID)
+    }
+
+    var currentUniOpsDeviceID: String {
+        persistedUniOpsDeviceID()
     }
 
     func testConnection(
@@ -155,6 +175,119 @@ final class AuthManager {
             persistCustomHeaders(for: serverURL)
             refreshServers()
             state = .loggedIn(server: serverURL)
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func configureUniOps(
+        serverURLString: String,
+        credential: String,
+        deviceName: String = UIDevice.current.name
+    ) async {
+        lastErrorMessage = nil
+
+        do {
+            let serverURL = try Self.normalizedServerURL(from: serverURLString)
+            let deviceID = persistedUniOpsDeviceID()
+            let response = try await APIClient(baseURL: serverURL, customHeaderProvider: { [] })
+                .createUniOpsMobileSession(
+                    credential: credential,
+                    deviceId: deviceID,
+                    deviceName: deviceName
+                )
+
+            guard
+                response.success != false,
+                let token = response.token?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !token.isEmpty,
+                let refreshToken = response.refreshToken?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !refreshToken.isEmpty,
+                let sessionID = response.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !sessionID.isEmpty
+            else {
+                lastErrorMessage = String(localized: "UniOps did not return a mobile session.")
+                return
+            }
+
+            try keychain.save(serverURL.absoluteString, forKey: .uniOpsServerURL)
+            try keychain.save(token, forKey: .uniOpsToken)
+            try keychain.save(refreshToken, forKey: .uniOpsRefreshToken)
+            try keychain.save(sessionID, forKey: .uniOpsSessionID)
+            try keychain.save(deviceID, forKey: .uniOpsDeviceID)
+            headerStore.replace(with: [])
+            state = .uniOpsLocked(server: serverURL)
+            await unlockUniOpsWithBiometrics()
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func unlockUniOpsWithBiometrics() async {
+        guard case .uniOpsLocked(let server) = state else { return }
+        do {
+            let unlocked = try await biometricGate.evaluate(
+                reason: String(localized: "Unlock UniOps by ALJAMRI Group")
+            )
+            if unlocked {
+                lastErrorMessage = nil
+                state = .uniOpsSignedIn(server: server)
+            }
+        } catch {
+            lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    func loadUniOpsSessions() async throws -> UniOpsMobileSessionsResponse {
+        let server: URL
+        switch state {
+        case .uniOpsSignedIn(let current):
+            server = current
+        default:
+            throw APIError.unauthorized
+        }
+
+        return try await makeUniOpsAPIClient(server: server).uniOpsMobileSessions()
+    }
+
+    func loadUniOpsApprovalInbox() async throws -> UniOpsApprovalInboxSnapshot {
+        let client = try signedInUniOpsAPIClient()
+        async let sessions = client.uniOpsMobileSessions()
+        async let approvals = client.uniOpsApprovals()
+
+        let (sessionsResult, approvalsResult) = try await (sessions, approvals)
+        return UniOpsApprovalInboxSnapshot(
+            sessions: sessionsResult.sessions,
+            items: approvalsResult.items,
+            counts: approvalsResult.counts
+        )
+    }
+
+    /// Approves or denies a unified `PendingApprovalItem`. `reason` is only
+    /// sent when the item's `decide.reasonField` is non-nil.
+    func decideUniOpsApproval(_ item: PendingApprovalItem, approved: Bool, reason: String? = nil) async throws {
+        guard let action = approved ? item.decide.approve : item.decide.deny else {
+            // No deny action means this source doesn't support rejecting —
+            // the caller (ContentView) should not have offered a reject button.
+            throw APIError.decoding(underlying: DecodingError.valueNotFound(
+                UniOpsApprovalDecideAction.self,
+                DecodingError.Context(codingPath: [], debugDescription: "Missing decide action for \(item.id)")
+            ))
+        }
+        _ = try await signedInUniOpsAPIClient().decideUniOpsApproval(
+            action,
+            headers: item.decide.headers,
+            reason: reason,
+            reasonField: item.decide.reasonField
+        )
+    }
+
+    func registerUniOpsPushToken(_ token: String) async {
+        guard case .uniOpsSignedIn(let server) = state else { return }
+        do {
+            _ = try await makeUniOpsAPIClient(server: server)
+                .registerUniOpsPushToken(token: token, deviceId: persistedUniOpsDeviceID())
+            lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription
         }
@@ -270,6 +403,19 @@ final class AuthManager {
         guard let active = state.server else {
             // Defensive: nothing is active. Safe full reset to onboarding.
             clearLocalAuth(for: nil)
+            state = .unconfigured
+            return
+        }
+
+        if case .uniOpsSignedIn = state {
+            await attemptBestEffortUniOpsRevoke(server: active)
+            clearUniOpsAuth()
+            state = .unconfigured
+            return
+        }
+
+        if case .uniOpsLocked = state {
+            clearUniOpsAuth()
             state = .unconfigured
             return
         }
@@ -413,6 +559,9 @@ final class AuthManager {
             // server's cookies so other configured servers stay signed in (#16).
             clearSessionCookies(for: server)
             state = .loggedOut(server: server)
+        case .uniOpsSignedIn, .uniOpsLocked:
+            clearUniOpsAuth()
+            state = .unconfigured
         case .unconfigured:
             clearLocalAuth(for: nil)
         }
@@ -506,6 +655,18 @@ final class AuthManager {
     }
 
     private func restoreSavedServer() {
+        if
+            let uniOpsValue = try? keychain.load(.uniOpsServerURL),
+            let uniOpsURL = URL(string: uniOpsValue),
+            ((try? keychain.load(.uniOpsToken)) ?? nil) != nil,
+            ((try? keychain.load(.uniOpsRefreshToken)) ?? nil) != nil,
+            ((try? keychain.load(.uniOpsSessionID)) ?? nil) != nil
+        {
+            headerStore.replace(with: [])
+            state = .uniOpsLocked(server: uniOpsURL)
+            return
+        }
+
         guard
             let savedValue = try? keychain.load(.serverURL),
             let savedURL = URL(string: savedValue)
@@ -525,6 +686,85 @@ final class AuthManager {
         // request after launch carries the saved headers (#255/#16).
         hydrateCustomHeaders(for: savedURL)
         state = .loggedIn(server: savedURL)
+    }
+
+    private func makeUniOpsAPIClient(server: URL) -> APIClient {
+        APIClient(
+            baseURL: server,
+            customHeaderProvider: { [] },
+            bearerTokenProvider: { [weak self] in
+                await self?.storedUniOpsToken()
+            },
+            mobileRefreshHandler: { [weak self] in
+                try await self?.refreshUniOpsTokenForRetry()
+            }
+        )
+    }
+
+    private func signedInUniOpsAPIClient() throws -> APIClient {
+        switch state {
+        case .uniOpsSignedIn(let server):
+            return makeUniOpsAPIClient(server: server)
+        default:
+            throw APIError.unauthorized
+        }
+    }
+
+    private func storedUniOpsToken() -> String? {
+        try? keychain.load(.uniOpsToken)
+    }
+
+    private func refreshUniOpsTokenForRetry() async throws -> String? {
+        guard
+            let serverValue = try? keychain.load(.uniOpsServerURL),
+            let serverURL = URL(string: serverValue),
+            let refreshToken = try? keychain.load(.uniOpsRefreshToken),
+            !refreshToken.isEmpty
+        else {
+            return nil
+        }
+
+        let response = try await APIClient(baseURL: serverURL, customHeaderProvider: { [] })
+            .refreshUniOpsMobileSession(refreshToken: refreshToken)
+        guard
+            response.success != false,
+            let token = response.token?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !token.isEmpty
+        else {
+            return nil
+        }
+
+        try keychain.save(token, forKey: .uniOpsToken)
+        if let sessionID = response.sessionId?.trimmingCharacters(in: .whitespacesAndNewlines), !sessionID.isEmpty {
+            try keychain.save(sessionID, forKey: .uniOpsSessionID)
+        }
+        return token
+    }
+
+    private func attemptBestEffortUniOpsRevoke(server: URL) async {
+        guard let sessionID = try? keychain.load(.uniOpsSessionID), !sessionID.isEmpty else {
+            return
+        }
+
+        _ = try? await makeUniOpsAPIClient(server: server).revokeUniOpsMobileSession(id: sessionID)
+    }
+
+    private func persistedUniOpsDeviceID() -> String {
+        if let saved = try? keychain.load(.uniOpsDeviceID), !saved.isEmpty {
+            return saved
+        }
+
+        let value = UUID().uuidString
+        try? keychain.save(value, forKey: .uniOpsDeviceID)
+        return value
+    }
+
+    private func clearUniOpsAuth() {
+        try? keychain.delete(.uniOpsServerURL)
+        try? keychain.delete(.uniOpsToken)
+        try? keychain.delete(.uniOpsRefreshToken)
+        try? keychain.delete(.uniOpsSessionID)
+        headerStore.replace(with: [])
     }
 
     nonisolated static func normalizedServerURL(from rawValue: String) throws -> URL {
@@ -577,6 +817,10 @@ final class AuthManager {
             return true
         }
 
+        if host.hasSuffix(".ts.net") {
+            return true
+        }
+
         let octets = host.split(separator: ".").compactMap { Int($0) }
         guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
             return false
@@ -594,3 +838,64 @@ protocol AuthAPIClient: Sendable {
 }
 
 extension APIClient: AuthAPIClient {}
+
+struct BiometricGate: Sendable {
+    func evaluate(reason: String) async throws -> Bool {
+        let context = LAContext()
+        var error: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) else {
+            throw error ?? LAError(.biometryNotAvailable)
+        }
+
+        return try await context.evaluatePolicy(
+            .deviceOwnerAuthenticationWithBiometrics,
+            localizedReason: reason
+        )
+    }
+}
+
+enum GoogleSignInProvider {
+    @MainActor
+    static func signInCredential() async throws -> String {
+        guard let presenter = UIApplication.shared.uniOpsPresentingViewController else {
+            throw APIError.http(statusCode: -1, body: "No active window for Google Sign-In.")
+        }
+
+        let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: presenter)
+        guard let token = result.user.idToken?.tokenString, !token.isEmpty else {
+            throw APIError.http(statusCode: -1, body: "Google Sign-In did not return an ID token.")
+        }
+        return token
+    }
+}
+
+private extension UIApplication {
+    var uniOpsPresentingViewController: UIViewController? {
+        connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .rootViewController?
+            .topMostPresentedViewController
+    }
+}
+
+private extension UIViewController {
+    var topMostPresentedViewController: UIViewController {
+        if let presentedViewController {
+            return presentedViewController.topMostPresentedViewController
+        }
+
+        if let navigationController = self as? UINavigationController,
+           let visible = navigationController.visibleViewController {
+            return visible.topMostPresentedViewController
+        }
+
+        if let tabBarController = self as? UITabBarController,
+           let selected = tabBarController.selectedViewController {
+            return selected.topMostPresentedViewController
+        }
+
+        return self
+    }
+}

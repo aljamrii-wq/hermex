@@ -34,6 +34,7 @@
 		1A2B3C4D5E6F700000000007 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700000000097 /* Highlightr */; };
 		1A2B3C4D5E6F700000000008 /* KeychainAccess in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F700000000098 /* KeychainAccess */; };
 		5417A7400000000000000092 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 5417A7400000000000000091 /* SwiftMath */; };
+		1A2B3C4D5E6F70000000000A /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F70000000009A /* GoogleSignIn */; };
 		1A2B3C4D5E6F7000000000A0 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F7000000000B0 /* KeychainStore.swift */; };
 		1A2B3C4D5E6F7000000000A1 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F7000000000B1 /* AuthManager.swift */; };
 		1A2B3C4D5E6F7000000000A2 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F7000000000B2 /* APIClient.swift */; };
@@ -632,6 +633,7 @@
 				1A2B3C4D5E6F700000000007 /* Highlightr in Frameworks */,
 				1A2B3C4D5E6F700000000008 /* KeychainAccess in Frameworks */,
 				5417A7400000000000000092 /* SwiftMath in Frameworks */,
+				1A2B3C4D5E6F70000000000A /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1191,6 +1193,7 @@
 				1A2B3C4D5E6F700000000097 /* Highlightr */,
 				1A2B3C4D5E6F700000000098 /* KeychainAccess */,
 				5417A7400000000000000091 /* SwiftMath */,
+				1A2B3C4D5E6F70000000009A /* GoogleSignIn */,
 			);
 			productName = HermesMobile;
 			productReference = 1A2B3C4D5E6F700000000010 /* HermesMobile.app */;
@@ -1308,6 +1311,7 @@
 				1A2B3C4D5E6F700000000093 /* XCRemoteSwiftPackageReference "Highlightr" */,
 				1A2B3C4D5E6F700000000099 /* XCRemoteSwiftPackageReference "KeychainAccess" */,
 				5417A7400000000000000090 /* XCRemoteSwiftPackageReference "SwiftMath" */,
+				1A2B3C4D5E6F70000000009B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			productRefGroup = 1A2B3C4D5E6F700000000032 /* Products */;
 			projectDirPath = "";
@@ -1811,6 +1815,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				GENERATE_INFOPLIST_FILE = NO;
+				GOOGLE_SIGN_IN_CLIENT_ID = "227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap.apps.googleusercontent.com";
+				GOOGLE_SIGN_IN_REVERSED_CLIENT_ID = "com.googleusercontent.apps.227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap";
 				INFOPLIST_FILE = HermesMobile/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1840,6 +1846,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
 				GENERATE_INFOPLIST_FILE = NO;
+				GOOGLE_SIGN_IN_CLIENT_ID = "227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap.apps.googleusercontent.com";
+				GOOGLE_SIGN_IN_REVERSED_CLIENT_ID = "com.googleusercontent.apps.227083284693-1fne426pp4lkta5q1fhqhdg2g5qe2sap";
 				INFOPLIST_FILE = HermesMobile/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -2115,6 +2123,14 @@
 				minimumVersion = 1.7.3;
 			};
 		};
+		1A2B3C4D5E6F70000000009B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = exactVersion;
+				version = 9.2.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -2152,6 +2168,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5417A7400000000000000090 /* XCRemoteSwiftPackageReference "SwiftMath" */;
 			productName = SwiftMath;
+		};
+		1A2B3C4D5E6F70000000009A /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1A2B3C4D5E6F70000000009B /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
