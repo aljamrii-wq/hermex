@@ -1,5 +1,12 @@
 # Codex Handoff — UniOps Founder iOS Control Plane (hermex base)
 
+> **Read `CLAUDE-CODEX-SHARED-LEDGER.md` in `aljamrigroup/ops` FIRST, before this file.** It's the
+> live, single source of truth for who owns what across this program (Claude = Linux/backend/docs,
+> Codex = Mac/Xcode/Flutter/hardware) — check it before starting so you don't duplicate work Claude
+> already did or re-derive a task Claude already queued for you. **Update your row there** when you
+> finish a chunk of work or hit a blocker, so Claude's next session sees current truth instead of
+> stale assumptions. This file is the persistent technical brief; the ledger is the live status.
+
 **From:** Claude (UniOps backend + fork setup)
 **To:** Codex (Apple/Xcode lane, builds on a Mac)
 **Date:** 2026-07-07
